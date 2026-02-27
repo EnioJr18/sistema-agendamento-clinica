@@ -3,11 +3,11 @@ from .models import Usuario, Medico, Agendamento
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
+    idade = serializers.IntegerField(read_only=True)
+
     class Meta:
         model = Usuario
-        fields = ['id', 'first_name', 'last_name', 'username',
-                  'tipo', 'email', 'telefone', 'password']
-
+        fields = ['id', 'username', 'first_name', 'last_name', 'email', 'password', 'tipo', 'telefone', 'data_nascimento', 'idade']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -32,8 +32,20 @@ class MedicoSerializer(serializers.ModelSerializer):
 
 
 class AgendamentoSerializer(serializers.ModelSerializer):
+    nome_medico = serializers.CharField(source='medico.usuario.get_full_name', read_only=True)
+    especialidade_medico = serializers.CharField(source='medico.especialidade', read_only=True)
+
+    nome_paciente = serializers.CharField(source='paciente.get_full_name', read_only=True)
+    email_paciente = serializers.CharField(source='paciente.email', read_only=True)
+    telefone_paciente = serializers.CharField(source='paciente.telefone', read_only=True)
+    idade_paciente = serializers.IntegerField(source='paciente.idade', read_only=True)
+
     class Meta:
         model = Agendamento
-        fields = ['id', 'medico', 'paciente',
-                  'data_horario', 'status', 'criado_em']
+        fields = [
+            'id', 
+            'medico', 'nome_medico', 'especialidade_medico', 
+            'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente',
+            'data_horario', 'status', 'criado_em'
+        ]
         read_only_fields = ['paciente', 'criado_em']

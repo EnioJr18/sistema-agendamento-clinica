@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from datetime import date
 
 class Usuario(AbstractUser): 
     TIPO_CHOICES = (
@@ -10,6 +11,14 @@ class Usuario(AbstractUser):
     )
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default='PACIENTE')
     telefone = models.CharField(max_length=20, blank=True, null=True)
+    data_nascimento = models.DateField(null=True, blank=True)
+
+    @property
+    def idade(self):
+        if self.data_nascimento:
+            hoje = date.today()
+            return hoje.year - self.data_nascimento.year - ((hoje.month, hoje.day) < (self.data_nascimento.month, self.data_nascimento.day))
+        return None
 
 
 class Medico(models.Model):

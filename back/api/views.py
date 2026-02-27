@@ -7,7 +7,12 @@ from rest_framework import permissions
 class UsuarioViewSet(viewsets.ModelViewSet):
     queryset = Usuario.objects.all()
     serializer_class = UsuarioSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    def get_permissions(self):
+        if self.action == 'create':
+            # Se for POST (Criar conta), a porta está aberta!
+            return [permissions.AllowAny()]
+        # Para todo o resto (Ver perfil, editar, listar), exige o Token!
+        return [permissions.IsAuthenticated()]
 
 class MedicoViewSet(viewsets.ModelViewSet):
     queryset = Medico.objects.all()
