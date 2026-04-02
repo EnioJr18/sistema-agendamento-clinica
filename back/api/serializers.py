@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from datetime import date
 from .models import Usuario, Medico, Agendamento
 
 
@@ -18,6 +19,11 @@ class UsuarioSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         return user
+    
+    def validate_data_nascimento(self, value):
+        if value and value > date.today():
+            raise serializers.ValidationError("A data de nascimento não pode estar no futuro.")
+        return value
 
 
 class MedicoSerializer(serializers.ModelSerializer):
@@ -48,4 +54,9 @@ class AgendamentoSerializer(serializers.ModelSerializer):
             'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente',
             'data_horario', 'status', 'criado_em'
         ]
-        read_only_fields = ['paciente', 'criado_em']
+    
+        read_only_fields = ['criado_em']
+        
+        extra_kwargs = {
+            'paciente': {'required': False}
+        }

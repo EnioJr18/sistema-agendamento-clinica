@@ -30,5 +30,13 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def perform_create(self, serializer):
-        serializer.save(paciente=self.request.user)
+        usuario_logado = self.request.user
+        
+        # Se for o ADMIN/Secretária logado, ele salva usando o ID do paciente que veio no JSON do Front-end
+        if usuario_logado.is_staff or usuario_logado.tipo == 'ADMIN':
+            serializer.save() 
+            
+        # Se for um PACIENTE comum, o sistema ignora o JSON e TRAVA a consulta no nome de quem está logado
+        else:
+            serializer.save(paciente=usuario_logado)
 
