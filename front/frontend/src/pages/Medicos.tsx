@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
+  Alert,
   Card,
   CardContent,
   Avatar,
@@ -22,14 +23,19 @@ import {
   Search,
   CalendarMonth,
 } from '@mui/icons-material';
-import { mockMedicos } from '../data/mockData';
+import { useDoctors } from '../hooks/useDoctors';
+import { useCreateSchedulling } from '../hooks/agendamentos/useCreateSchedulling';
 
 export default function Medicos() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMedico, setSelectedMedico] = useState<number | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [schedullingDateTime, setSchedullingDateTime] = useState('');
 
-  const filteredMedicos = mockMedicos.filter(
+  const { data: medicos = [], isLoading, isError } = useDoctors();
+  const createSchedullingMutation = useCreateSchedulling();
+
+  const filteredMedicos = medicos.filter(
     medico =>
       medico.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
       medico.especialidade.toLowerCase().includes(searchTerm.toLowerCase()),
@@ -43,6 +49,24 @@ export default function Medicos() {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setSelectedMedico(null);
+    setSchedullingDateTime('');
+    createSchedullingMutation.reset();
+  };
+
+  const handleCreateSchedulling = () => {
+    if (!selectedMedico || !schedullingDateTime) return;
+
+    createSchedullingMutation.mutate(
+      {
+        medico: selectedMedico,
+        data_horario: new Date(schedullingDateTime).toISOString(),
+      },
+      {
+        onSuccess: () => {
+          handleCloseDialog();
+        },
+      },
+    );
   };
 
   const containerVariants = {
@@ -67,8 +91,32 @@ export default function Medicos() {
   };
 
   const medico = selectedMedico
-    ? mockMedicos.find(m => m.id === selectedMedico)
+    ? medicos.find(m => m.id === selectedMedico)
     : null;
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold bg-linear-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
+          Nossos Médicos
+        </h1>
+        <p className="text-gray-600">Carregando médicos...</p>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold bg-linear-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
+          Nossos Médicos
+        </h1>
+        <p className="text-red-600">
+          Não foi possível carregar os médicos. Tente novamente em instantes.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -215,15 +263,23 @@ export default function Medicos() {
               <Typography variant="body2" className="text-gray-600">
                 <strong>Disponibilidade:</strong> {medico.disponibilidade}
               </Typography>
-              <div className="pt-4">
-                <Typography
-                  variant="body2"
-                  className="text-gray-500 text-center"
-                >
-                  🚧 Em breve você poderá escolher a data e horário da sua
-                  consulta. Esta funcionalidade será integrada com a API.
-                </Typography>
+              <div className="pt-2">
+                <TextField
+                  fullWidth
+                  label="Data e horario"
+                  type="datetime-local"
+                  value={schedullingDateTime}
+                  onChange={event => setSchedullingDateTime(event.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
               </div>
+
+              {createSchedullingMutation.isError && (
+                <Alert severity="error">
+                  Nao foi possivel criar o agendamento. Verifique os dados e
+                  tente novamente.
+                </Alert>
+              )}
             </div>
           )}
         </DialogContent>
@@ -237,9 +293,14 @@ export default function Medicos() {
           <Button
             variant="contained"
             className="bg-linear-to-r from-teal-600 to-cyan-600 w-full sm:w-auto order-1 sm:order-2"
-            onClick={handleCloseDialog}
+            onClick={handleCreateSchedulling}
+            disabled={
+              !schedullingDateTime || createSchedullingMutation.isPending
+            }
           >
-            Confirmar (em breve)
+            {createSchedullingMutation.isPending
+              ? 'Agendando...'
+              : 'Confirmar Agendamento'}
           </Button>
         </DialogActions>
       </Dialog>

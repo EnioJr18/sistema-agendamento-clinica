@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
+  Alert,
   Card,
   CardContent,
   Chip,
@@ -23,33 +24,39 @@ import {
   Info,
   Delete,
 } from '@mui/icons-material';
-import { mockAgendamentos } from '../data/mockData';
 import type { Agendamento } from '../types';
+import { useSchedulling } from '../hooks/agendamentos/useSchedulling';
+import { useCancelSchedulling } from '../hooks/agendamentos/useCancelSchedulling';
 
 export default function Agendamentos() {
   const [tabValue, setTabValue] = useState(0);
   const [selectedAgendamento, setSelectedAgendamento] =
     useState<Agendamento | null>(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
+  const [pendingCancelId, setPendingCancelId] = useState<number | null>(null);
+
+  const { data: schedullings = [], isLoading, isError } = useSchedulling();
+  const cancelSchedullingMutation = useCancelSchedulling();
 
   // Filtra agendamentos com base na aba selecionada
   const filteredAgendamentos = useMemo(() => {
     switch (tabValue) {
       case 0: // Próximos
-        return mockAgendamentos.filter(
+        return schedullings.filter(
           a => a.status === 'AGENDADO' && new Date(a.data_horario) > new Date(),
         );
       case 1: // Histórico
-        return mockAgendamentos.filter(
+        return schedullings.filter(
           a =>
             a.status === 'CONCLUIDO' || new Date(a.data_horario) < new Date(),
         );
       case 2: // Cancelados
-        return mockAgendamentos.filter(a => a.status === 'CANCELADO');
+        return schedullings.filter(a => a.status === 'CANCELADO');
       default:
-        return mockAgendamentos;
+        return schedullings;
     }
-  }, [tabValue]);
+  }, [tabValue, schedullings]);
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -63,6 +70,28 @@ export default function Agendamentos() {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setSelectedAgendamento(null);
+    cancelSchedullingMutation.reset();
+  };
+
+  const handleOpenCancelConfirm = (agendamentoId: number) => {
+    setPendingCancelId(agendamentoId);
+    setConfirmCancelOpen(true);
+  };
+
+  const handleCloseCancelConfirm = () => {
+    setConfirmCancelOpen(false);
+    setPendingCancelId(null);
+  };
+
+  const handleCancelSchedulling = (agendamentoId: number) => {
+    cancelSchedullingMutation.mutate(agendamentoId, {
+      onSuccess: () => {
+        handleCloseCancelConfirm();
+        if (selectedAgendamento?.id === agendamentoId) {
+          handleCloseDialog();
+        }
+      },
+    });
   };
 
   const getStatusColor = (status: string) => {
@@ -129,6 +158,30 @@ export default function Agendamentos() {
     },
   };
 
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-4xl md:text-5xl font-bold bg-linear-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
+          Meus Agendamentos
+        </h1>
+        <p className="text-gray-600">Carregando agendamentos...</p>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-4xl md:text-5xl font-bold bg-linear-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
+          Meus Agendamentos
+        </h1>
+        <p className="text-red-600">
+          Não foi possível carregar os agendamentos. Tente novamente.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {/* Header Section */}
@@ -188,6 +241,12 @@ export default function Agendamentos() {
         animate="visible"
         className="space-y-4"
       >
+        {cancelSchedullingMutation.isError && (
+          <Alert severity="error">
+            Nao foi possivel cancelar o agendamento. Tente novamente.
+          </Alert>
+        )}
+
         {filteredAgendamentos.length > 0 ? (
           filteredAgendamentos.map(agendamento => (
             <motion.div key={agendamento.id} variants={itemVariants}>
@@ -202,10 +261,10 @@ export default function Agendamentos() {
                         </div>
                         <div className="flex-1">
                           <h3 className="text-xl font-semibold text-gray-800">
-                            {agendamento.medico_nome}
+                            {agendamento.nome_medico}
                           </h3>
                           <p className="text-gray-600">
-                            {agendamento.medico_especialidade}
+                            {agendamento.especialidade_medico}
                           </p>
                         </div>
                         <Chip
@@ -243,6 +302,10 @@ export default function Agendamentos() {
                           size="small"
                           className="text-red-600 hover:bg-red-50 self-center sm:self-auto"
                           title="Cancelar"
+                          onClick={() =>
+                            handleOpenCancelConfirm(agendamento.id)
+                          }
+                          disabled={cancelSchedullingMutation.isPending}
                         >
                           <Delete />
                         </IconButton>
@@ -282,7 +345,7 @@ export default function Agendamentos() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Typography variant="h6" className="text-gray-800">
-                  {selectedAgendamento.medico_nome}
+                  {selectedAgendamento.nome_medico}
                 </Typography>
                 <Chip
                   label={selectedAgendamento.status}
@@ -293,7 +356,7 @@ export default function Agendamentos() {
               <div className="space-y-2 text-gray-600">
                 <Typography variant="body1">
                   <strong>Especialidade:</strong>{' '}
-                  {selectedAgendamento.medico_especialidade}
+                  {selectedAgendamento.especialidade_medico}
                 </Typography>
                 <Typography variant="body1">
                   <strong>Data:</strong>{' '}
@@ -333,12 +396,51 @@ export default function Agendamentos() {
             <Button
               variant="outlined"
               color="error"
-              onClick={handleCloseDialog}
+              onClick={() => handleOpenCancelConfirm(selectedAgendamento.id)}
+              disabled={cancelSchedullingMutation.isPending}
               className="w-full sm:w-auto order-1 sm:order-2"
             >
-              Cancelar Consulta
+              {cancelSchedullingMutation.isPending
+                ? 'Cancelando...'
+                : 'Cancelar Consulta'}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={confirmCancelOpen}
+        onClose={handleCloseCancelConfirm}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle className="text-red-600">
+          Confirmar cancelamento
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" className="text-gray-700">
+            Tem certeza que deseja cancelar este agendamento?
+          </Typography>
+        </DialogContent>
+        <DialogActions className="p-4 gap-2">
+          <Button
+            onClick={handleCloseCancelConfirm}
+            disabled={cancelSchedullingMutation.isPending}
+          >
+            Voltar
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() =>
+              pendingCancelId && handleCancelSchedulling(pendingCancelId)
+            }
+            disabled={!pendingCancelId || cancelSchedullingMutation.isPending}
+          >
+            {cancelSchedullingMutation.isPending
+              ? 'Cancelando...'
+              : 'Confirmar'}
+          </Button>
         </DialogActions>
       </Dialog>
 
