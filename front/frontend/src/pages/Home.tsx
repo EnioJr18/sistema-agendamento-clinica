@@ -8,8 +8,50 @@ import {
   Healing,
   HealthAndSafety,
 } from '@mui/icons-material';
+import { useDoctors } from '../hooks/useDoctors';
+import { useSchedulling } from '../hooks/agendamentos/useSchedulling';
 
 export default function Home() {
+  const {
+    data: doctors = [],
+    isLoading: isLoadingDoctors,
+    isError: isErrorDoctors,
+  } = useDoctors();
+  const {
+    data: schedullings = [],
+    isLoading: isLoadingSchedullings,
+    isError: isErrorSchedullings,
+  } = useSchedulling();
+
+  const upcomingSchedullings = schedullings.filter(
+    schedulling =>
+      schedulling.status === 'AGENDADO' &&
+      new Date(schedulling.data_horario) > new Date(),
+  );
+
+  const loading = isLoadingDoctors || isLoadingSchedullings;
+
+  const stats = [
+    {
+      title: 'Medicos Disponiveis',
+      value: doctors.length,
+      description: 'Profissionais cadastrados na plataforma',
+      color: 'from-teal-500 to-cyan-500',
+    },
+    {
+      title: 'Agendamentos Totais',
+      value: schedullings.length,
+      description: 'Consultas cadastradas no sistema',
+      color: 'from-cyan-500 to-blue-500',
+    },
+    {
+      title: 'Proximas Consultas',
+      value: upcomingSchedullings.length,
+      description: 'Consultas com status AGENDADO',
+      color: 'from-emerald-500 to-teal-500',
+    },
+  ];
+
   const services = [
     {
       icon: <MedicalServices className="text-5xl" />,
@@ -94,8 +136,8 @@ export default function Home() {
           transition={{ duration: 0.5, delay: 0.4 }}
           className="text-xl md:text-2xl text-gray-600 max-w-3xl mx-auto"
         >
-          Sua saúde é nossa prioridade. Oferecemos atendimento médico de
-          excelência com profissionais qualificados e tecnologia de ponta.
+          Sua saude e nossa prioridade. Oferecemos atendimento medico de
+          excelencia com profissionais qualificados e tecnologia de ponta.
         </motion.p>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -120,6 +162,42 @@ export default function Home() {
           </Button>
         </motion.div>
       </motion.section>
+
+      {/* Dynamic Stats */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true }}
+        transition={{ duration: 0.6 }}
+        className="grid grid-cols-1 md:grid-cols-3 gap-4"
+      >
+        {stats.map(stat => (
+          <Card
+            key={stat.title}
+            className="border border-gray-100 shadow-md hover:shadow-lg transition-shadow"
+          >
+            <CardContent className="space-y-2">
+              <div
+                className={`inline-flex px-3 py-1 rounded-full text-white text-xs font-semibold bg-linear-to-r ${stat.color}`}
+              >
+                {stat.title}
+              </div>
+              <h3 className="text-4xl font-black text-slate-800">
+                {loading ? '--' : stat.value}
+              </h3>
+              <p className="text-sm text-slate-600">{stat.description}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </motion.section>
+
+      {(isErrorDoctors || isErrorSchedullings) && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <p className="text-red-600 text-center">
+            Nao foi possivel carregar todos os dados em tempo real da API.
+          </p>
+        </motion.div>
+      )}
 
       {/* Services Section */}
       <Container maxWidth="lg">
