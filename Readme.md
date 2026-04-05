@@ -127,3 +127,16 @@ Este projeto é uma solução Fullstack para clínicas e profissionais autônomo
 ## 📝 Licença
 
 Este projeto está sob a licença MIT.
+
+## 🤝 Contribuição
+Contribuições são bem-vindas! Sinta-se à vontade para abrir issues ou enviar pull requests.
+
+Entre em contato com Enio Jr. para dúvidas, sugestões ou colaborações futuras:
+📧 E-mail: eniojr100@gmail.com <br>
+🔗 LinkedIn: https://www.linkedin.com/in/enioeduardojr <br>
+📷 Instagram: https://www.instagram.com/enio_juniorrr <br>
+
+Entre em contato com David Gabriel para dúvidas, sugestões ou colaborações futuras:
+📧 E-mail: davidglm.trabalho@gmail.com <br>
+🔗 LinkedIn: https://www.linkedin.com/in/davidgabriellm <br>
+📷 Instagram: https://www.instagram.com/davinho_glm <br>
