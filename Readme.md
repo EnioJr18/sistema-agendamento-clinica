@@ -131,6 +131,13 @@ Este projeto está sob a licença MIT.
 ## 🤝 Contribuição
 Contribuições são bem-vindas! Sinta-se à vontade para abrir issues ou enviar pull requests.
 
+## 👨‍💻 Autores
+
+O desenvolvimento está dividido em duas frentes principais:
+
+* **Backend (API e Banco de Dados):** Desenvolvido por Enio Jr.
+* **Frontend (Web):** Desenvolvido por Daivid Gabriel.
+
 Entre em contato com Enio Jr. para dúvidas, sugestões ou colaborações futuras: <br>
 📧 E-mail: eniojr100@gmail.com <br>
 🔗 LinkedIn: https://www.linkedin.com/in/enioeduardojr <br>
