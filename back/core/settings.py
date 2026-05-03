@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import dj_database_url # type: ignore
 from decouple import config
+import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -87,6 +88,15 @@ DATABASES = {
         conn_health_checks=True,
     )
 }
+
+# 🛡️ MODO DE TESTES:
+# Se o comando digitado no terminal for 'test', o Django ignora a nuvem
+# e cria um banco SQLite local rapidinho apenas para rodar os testes.
+if 'test' in sys.argv:
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db_test.sqlite3',
+    }
 
 
 # Password validation
