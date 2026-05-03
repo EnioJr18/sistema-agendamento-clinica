@@ -99,7 +99,7 @@ Este projeto é uma solução Fullstack para clínicas odontológicas e profissi
     ```
     *Acesse o painel em: `http://127.0.0.1:8000/admin`*
 
-Para rodar os testes automatizados da API, utilize o comando  ```bash python manage.py test ```
+Para rodar os testes automatizados da API, utilize o comando  ```python manage.py test ```
 
 ### 2️⃣ Configurando o Frontend (React)
 
