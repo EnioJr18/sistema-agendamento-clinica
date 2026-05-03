@@ -114,16 +114,6 @@ Este projeto é uma solução Fullstack para clínicas e profissionais autônomo
 
 ---
 
-## 👥 Equipe
-
-| Dev | Função | Responsabilidade |
-| --- | --- | --- |
-| **Enio Jr (Arquiteto)** | Backend & DB | Modelagem, Configuração Neon (Postgres), Auth. |
-| **David Gabriel (Frontend)** | UI/UX | Telas de agendamento, Dashboards, Responsividade. |
-| **Guilherme Pontes (Fullstack)** | Regras & Integração | Lógica de horários, Conexão API <-> Front. |
-
----
-
 ## 📝 Licença
 
 Este projeto está sob a licença MIT.

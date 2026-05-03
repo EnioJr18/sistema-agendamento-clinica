@@ -5,7 +5,7 @@ from datetime import date
 
 class Usuario(AbstractUser): 
     TIPO_CHOICES = (
-        ('MEDICO', 'Médico'),
+        ('DENTISTA', 'Dentista'),
         ('PACIENTE', 'Paciente'),
         ('ADMIN', 'Administrador'),
     )
@@ -21,10 +21,10 @@ class Usuario(AbstractUser):
         return None
 
 
-class Medico(models.Model):
-    usuario = models.OneToOneField(Usuario, on_delete=models.CASCADE, related_name='perfil_medico')
+class Dentista(models.Model):
+    usuario = models.OneToOneField(Usuario, on_delete=models.CASCADE, related_name='perfil_dentista')
     especialidade = models.CharField(max_length=100)
-    crm = models.CharField(max_length=20, unique=True)
+    cro = models.CharField(max_length=20, unique=True)
     ativo = models.BooleanField(default=True)
     disponibilidade = models.TextField(blank=True, null=True, help_text="Ex: Seg a Sex, 08h as 18h")
 
@@ -39,8 +39,9 @@ class Agendamento(models.Model):
         ('CONCLUIDO', 'Concluído'),
     )
 
-    medico = models.ForeignKey(Medico, on_delete=models.CASCADE, related_name='agenda')
+    dentista = models.ForeignKey(Dentista, on_delete=models.CASCADE, related_name='agenda')
     paciente = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='meus_agendamentos')
+    procedimento = models.CharField(max_length=150)
 
     data_horario = models.DateTimeField(help_text="Data e hora da consulta")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='AGENDADO')
@@ -48,8 +49,8 @@ class Agendamento(models.Model):
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('medico', 'data_horario')  # Garante que um médico não tenha dois agendamentos no mesmo horário
+        unique_together = ('dentista', 'data_horario')  # Garante que um dentista não tenha dois agendamentos no mesmo horário
         ordering = ['data_horario']
 
     def __str__(self):
-        return f"{self.paciente} com {self.medico} em {self.data_horario}"
+        return f"{self.paciente} com {self.dentista} em {self.data_horario}"
