@@ -35,7 +35,6 @@ class DentistaViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
 class AgendamentoViewSet(viewsets.ModelViewSet):
-    queryset = Agendamento.objects.all()
     serializer_class = AgendamentoSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -48,6 +47,28 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     # 3. Qual é a ordem PADRÃO se o front-end não pedir nada? 
     # (data_horario crescente = do mais próximo no tempo para o mais distante)
     ordering = ['data_horario']
+
+    def get_queryset(self):
+        """
+        Filtra os agendamentos dependendo de QUEM está logado.
+        """
+        usuario_logado = self.request.user
+
+        # 1. Se for o ADMIN ou a Secretária: Vê a agenda da clínica inteira
+        if usuario_logado.is_staff or usuario_logado.tipo == 'ADMIN':
+            return Agendamento.objects.all()
+
+        # 2. Se for um DENTISTA: Vê apenas os agendamentos vinculados a ele
+        elif usuario_logado.tipo == 'DENTISTA':
+            # Atravessamos a relação: Agendamento -> Dentista -> Usuario
+            return Agendamento.objects.filter(dentista__usuario=usuario_logado)
+
+        # 3. Se for um PACIENTE comum: Vê apenas as próprias consultas marcadas
+        elif usuario_logado.tipo == 'PACIENTE':
+            return Agendamento.objects.filter(paciente=usuario_logado)
+
+        # Retorno de segurança caso o usuário não se encaixe em nada
+        return Agendamento.objects.none()
 
     def perform_create(self, serializer):
         usuario_logado = self.request.user
