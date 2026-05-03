@@ -1,4 +1,4 @@
-# 🏥 Sistema de Agendamento Clínico
+# 🦷 Sistema de Agendamento Odontológico
 
 ![Status](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow)
 ![Python](https://img.shields.io/badge/Python-3.13-blue)
@@ -7,29 +7,31 @@
 ![Postgres](https://img.shields.io/badge/PostgreSQL-18-336791)
 ![Neon](https://img.shields.io/badge/Neon-Serverless-00e599)
 
-> Um sistema completo para gestão de consultas médicas, focado em resolução de conflitos de horário, múltiplos perfis de usuário e validação robusta de dados.
+> Um sistema completo para gestão de consultas odontológicas, focado em resolução de conflitos de horário, múltiplos perfis de usuário e validação robusta de dados.
 
 ---
 
 ## 📋 Sobre o Projeto
 
-Este projeto é uma solução Fullstack para clínicas e profissionais autônomos. O sistema utiliza uma arquitetura **Monorepo**, contendo tanto o Backend (API) quanto o Frontend no mesmo repositório, com banco de dados em nuvem para facilitar a colaboração da equipe.
+Este projeto é uma solução Fullstack para clínicas odontológicas e profissionais autônomos. O sistema utiliza uma arquitetura **Monorepo**, contendo tanto o Backend (API) quanto o Frontend no mesmo repositório, com banco de dados em nuvem para facilitar a colaboração da equipe.
 
 ## ✨ Funcionalidades
 
 ### 🔐 Autenticação e Perfis
-- **Múltiplos Papéis:** Sistema de login com diferenciação entre `Admin`, `Médico` e `Paciente`.
+- **Múltiplos Papéis:** Sistema de login com diferenciação entre `Admin`, `Dentista` e `Paciente`.
 - **Cadastro Seguro:** Dados sensíveis protegidos e senhas criptografadas.
 
 ### 📅 Gestão de Agenda (Core)
 - **Visualização de Horários:** O paciente vê apenas os horários livres (confirmação visual).
 - **Bloqueio Automático:** O sistema impede agendamentos duplicados no mesmo horário (Constraint `unique_together` no banco).
+- **Procedimentos:** Registro específico do procedimento a ser realizado em cada consulta (ex: Limpeza, Extração).
 - **Histórico:** Logs de data de criação para auditoria.
 
-### ⚙️ Regras de Negócio
+### ⚙️ Regras de Negócio e Qualidade (QA)
 - Validação de datas (impedir agendamento no passado).
 - Cancelamento e reagendamento de consultas.
-- Cadastro de especialidades médicas e CRM.
+- Cadastro de especialidades odontológicas e validação de registro profissional (CRO).
+- **Testes Automatizados:** Suíte de testes (Modelos e Views) configurada para rodar em banco SQLite isolado, garantindo confiabilidade sem afetar a produção.
 
 ---
 
@@ -39,6 +41,7 @@ Este projeto é uma solução Fullstack para clínicas e profissionais autônomo
 - **Linguagem:** Python 3.13
 - **Framework:** Django & Django REST Framework (DRF)
 - **Banco de Dados:** PostgreSQL 18 (Via Neon Tech - Serverless)
+- **Banco de Dados (Testes):** SQLite (In-memory)
 - **Libs Principais:** `python-decouple`, `dj-database-url`, `django-cors-headers`
 
 ### Frontend (Interface)
@@ -95,6 +98,8 @@ Este projeto é uma solução Fullstack para clínicas e profissionais autônomo
     python manage.py runserver
     ```
     *Acesse o painel em: `http://127.0.0.1:8000/admin`*
+
+Para rodar os testes automatizados da API, utilize o comando  ```bash python manage.py test ```
 
 ### 2️⃣ Configurando o Frontend (React)
 
