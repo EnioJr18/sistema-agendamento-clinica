@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets, permissions, filters
-from .models import Usuario, Medico, Agendamento
-from .serializers import UsuarioSerializer, MedicoSerializer, AgendamentoSerializer
+from .models import Usuario, Dentista, Agendamento
+from .serializers import UsuarioSerializer, DentistaSerializer, AgendamentoSerializer
 from django_filters.rest_framework import DjangoFilterBackend
 
 class UsuarioViewSet(viewsets.ModelViewSet):
@@ -14,9 +14,9 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         # Para todo o resto (Ver perfil, editar, listar), exige o Token!
         return [permissions.IsAuthenticated()]
 
-class MedicoViewSet(viewsets.ModelViewSet):
-    queryset = Medico.objects.all()
-    serializer_class = MedicoSerializer
+class DentistaViewSet(viewsets.ModelViewSet):
+    queryset = Dentista.objects.all()
+    serializer_class = DentistaSerializer
 
     # 1. Ativa o motor de busca do django-filter
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter] 
@@ -24,9 +24,9 @@ class MedicoViewSet(viewsets.ModelViewSet):
     # 2. Define por quais campos o Front-end pode pesquisar
     filterset_fields = ['especialidade', 'ativo']
     
-    # (Opcional) Já deixo a ordenação padrão por nome também
-    ordering_fields = ['nome']
-    ordering = ['nome']
+    # Ordenação cruzando a tabela Dentista -> Usuario
+    ordering_fields = ['usuario__first_name', 'especialidade']
+    ordering = ['usuario__first_name']
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:

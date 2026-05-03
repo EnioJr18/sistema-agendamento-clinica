@@ -28,7 +28,7 @@ urlpatterns = [
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
-    # Rotas da nossa API (Usuarios, Medicos, Agendamentos)
-    # Tudo vai começar com 'api/' (ex: api/medicos/)
+    # Rotas da nossa API (Usuarios, Dentistas, Agendamentos)
+    # Tudo vai começar com 'api/' (ex: api/dentistas/)
     path('api/', include('api.urls')),
 ]
