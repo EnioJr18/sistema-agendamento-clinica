@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from datetime import date
-from .models import Usuario, Medico, Agendamento
+from .models import Usuario, Dentista, Agendamento
 
 
 class UsuarioSerializer(serializers.ModelSerializer):
@@ -26,20 +26,21 @@ class UsuarioSerializer(serializers.ModelSerializer):
         return value
 
 
-class MedicoSerializer(serializers.ModelSerializer):
+class DentistaSerializer(serializers.ModelSerializer):
     # Campos calculados (Só leitura - buscam dados da tabela Usuario)
     nome = serializers.CharField(source='usuario.get_full_name', read_only=True)
     email = serializers.EmailField(source='usuario.email', read_only=True)
     telefone = serializers.CharField(source='usuario.telefone', read_only=True)
 
     class Meta:
-        model = Medico
-        fields = ['id', 'usuario', 'nome', 'especialidade', 'crm', 'email', 'telefone', 'disponibilidade', 'ativo']
+        model = Dentista
+        fields = ['id', 'usuario', 'nome', 'especialidade', 'cro', 'email', 'telefone', 'disponibilidade', 'ativo']
 
 
 class AgendamentoSerializer(serializers.ModelSerializer):
-    nome_medico = serializers.CharField(source='medico.usuario.get_full_name', read_only=True)
-    especialidade_medico = serializers.CharField(source='medico.especialidade', read_only=True)
+    nome_dentista = serializers.CharField(source='dentista.usuario.get_full_name', read_only=True)
+    especialidade_dentista = serializers.CharField(source='dentista.especialidade', read_only=True)
+    procedimento = serializers.CharField(required=True)
 
     nome_paciente = serializers.CharField(source='paciente.get_full_name', read_only=True)
     email_paciente = serializers.CharField(source='paciente.email', read_only=True)
@@ -50,8 +51,9 @@ class AgendamentoSerializer(serializers.ModelSerializer):
         model = Agendamento
         fields = [
             'id', 
-            'medico', 'nome_medico', 'especialidade_medico', 
+            'dentista', 'nome_dentista', 'especialidade_dentista', 
             'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente',
+            'procedimento',
             'data_horario', 'status', 'criado_em'
         ]
     
