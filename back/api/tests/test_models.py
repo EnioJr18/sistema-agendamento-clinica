@@ -1,32 +1,28 @@
 from django.test import TestCase
-from api.models import Usuario, Dentista
+
+from api.models import Dentista, Usuario
+
 
 class DentistaModelTest(TestCase):
     def setUp(self):
-        """
-        O setUp roda ANTES de cada teste. 
-        É aqui que preparamos o 'terreno' criando dados fictícios no banco SQLite.
-        """
-        # 1. Criamos um usuário com Nome e Sobrenome
-        self.usuario = Usuario.objects.create(
-            username="joaodentista",
-            first_name="João",
-            last_name="Silva"
+        self.usuario = Usuario.objects.create_user(
+            username='joaodentista',
+            password='SenhaAtual123!',
+            nome_completo='Joao Silva',
+            email='joao.silva@example.com',
+            cpf='40000000001',
+            data_nascimento='1985-01-10',
+            telefone='82955554444',
+            tipo='DENTISTA',
         )
-        
-        # 2. Criamos o dentista e vinculamos ao usuário acima
+
         self.dentista = Dentista.objects.create(
             usuario=self.usuario,
-            especialidade="Ortodontia",
-            cro="12345-AL"
+            especialidade='Ortodontia',
+            cro='12345-AL',
         )
 
     def test_dentista_str_retorna_nome_e_especialidade(self):
-        """
-        Testa se o painel do Admin e o sistema vão exibir o nome corretamente.
-        """
-        # O que esperamos que o sistema gere?
-        resultado_esperado = "Dr(a). João Silva - Ortodontia"
-        
-        # Comparamos a string gerada pelo modelo com o que esperamos
+        resultado_esperado = 'Dr(a). Joao Silva - Ortodontia'
+
         self.assertEqual(str(self.dentista), resultado_esperado)

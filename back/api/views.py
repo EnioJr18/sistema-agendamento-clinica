@@ -46,8 +46,8 @@ class DentistaViewSet(viewsets.ModelViewSet):
     serializer_class = DentistaSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['especialidade', 'ativo']
-    ordering_fields = ['usuario__first_name', 'especialidade']
-    ordering = ['usuario__first_name']
+    ordering_fields = ['usuario__nome_completo', 'especialidade']
+    ordering = ['usuario__nome_completo']
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:

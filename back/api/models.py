@@ -1,17 +1,22 @@
-from django.db import models
-from django.contrib.auth.models import AbstractUser
-from django.utils import timezone
 from datetime import date
 
-class Usuario(AbstractUser): 
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+
+
+class Usuario(AbstractUser):
     TIPO_CHOICES = (
         ('DENTISTA', 'Dentista'),
         ('PACIENTE', 'Paciente'),
         ('ADMIN', 'Administrador'),
     )
+    nome_completo = models.CharField(max_length=255)
+    nome_preferido = models.CharField(max_length=150, blank=True)
+    email = models.EmailField(unique=True)
+    cpf = models.CharField(max_length=20, unique=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default='PACIENTE')
-    telefone = models.CharField(max_length=20, blank=True, null=True)
-    data_nascimento = models.DateField(null=True, blank=True)
+    telefone = models.CharField(max_length=20)
+    data_nascimento = models.DateField(null=True)
 
     @property
     def idade(self):
@@ -19,6 +24,30 @@ class Usuario(AbstractUser):
             hoje = date.today()
             return hoje.year - self.data_nascimento.year - ((hoje.month, hoje.day) < (self.data_nascimento.month, self.data_nascimento.day))
         return None
+
+    def get_full_name(self):
+        return self.nome_completo or super().get_full_name()
+
+    def get_short_name(self):
+        return self.nome_preferido or self.nome_completo or self.username
+
+    def __str__(self):
+        return self.get_full_name() or self.username
+
+
+class Endereco(models.Model):
+    usuario = models.OneToOneField(Usuario, on_delete=models.CASCADE, related_name='endereco')
+    cep = models.CharField(max_length=9, blank=True)
+    logradouro = models.CharField(max_length=255, blank=True)
+    numero = models.CharField(max_length=20, blank=True)
+    complemento = models.CharField(max_length=100, blank=True)
+    bairro = models.CharField(max_length=100, blank=True)
+    cidade = models.CharField(max_length=100, blank=True)
+    estado = models.CharField(max_length=2, blank=True)
+
+    def __str__(self):
+        partes = [self.logradouro, self.numero, self.cidade, self.estado]
+        return ', '.join([parte for parte in partes if parte])
 
 
 class Dentista(models.Model):
