@@ -12,7 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 import dj_database_url # type: ignore
-from decouple import config
+from decouple import Csv, config
 import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -135,13 +135,12 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-CORS_ALLOW_ALL_ORIGINS = True # Para desenvolvimento (aceita tudo)
-# Ou, mais seguro:
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:5173", # Porta padrão do Vite/React
-#     "http://localhost:3000",
-# ]
-
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://localhost:5173',
+    cast=Csv(),
+)
 AUTH_USER_MODEL = 'api.Usuario'
 
 REST_FRAMEWORK = {
@@ -151,5 +150,3 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
 }
-
-CORS_ALLOW_ALL_ORIGINS = True
