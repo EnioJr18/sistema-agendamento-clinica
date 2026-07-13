@@ -57,6 +57,21 @@ class DentistaViewSetTest(APITestCase):
         self.assertEqual(len(response.data['results']), 1)
         self.assertEqual(response.data['results'][0]['especialidade'], 'Odontopediatria')
 
+    def test_endpoint_versionado_dentistas_usa_contrato_odontologico(self):
+        self.client.force_authenticate(user=self.paciente)
+        response = self.client.get('/api/v1/dentistas/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('results', response.data)
+        self.assertIn('cro', response.data['results'][0])
+        self.assertNotIn('crm', response.data['results'][0])
+
+    def test_endpoint_legacy_medicos_nao_existe_no_v1(self):
+        self.client.force_authenticate(user=self.paciente)
+        response = self.client.get('/api/v1/medicos/')
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
 
 class UsuarioCadastroViewSetTest(APITestCase):
     def setUp(self):
@@ -347,6 +362,23 @@ class MultiClinicaViewSetTest(APITestCase):
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['id'], self.clinica_a.id)
 
+    def test_endpoints_versionados_principais_respondem(self):
+        self.client.force_authenticate(self.paciente_a)
+
+        respostas = [
+            self.client.get('/api/v1/clinicas/'),
+            self.client.get('/api/v1/dentistas/'),
+            self.client.get('/api/v1/procedimentos/'),
+            self.client.get('/api/v1/agendamentos/'),
+        ]
+
+        for response in respostas:
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertIn('count', response.data)
+            self.assertIn('next', response.data)
+            self.assertIn('previous', response.data)
+            self.assertIn('results', response.data)
+
     def test_usuario_de_clinica_a_nao_acessa_dentista_da_clinica_b(self):
         self.client.force_authenticate(self.paciente_a)
         response = self.client.get(reverse('dentista-detail', args=[self.dentista_b.pk]))
@@ -374,6 +406,21 @@ class MultiClinicaViewSetTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('dentista', response.data)
 
+    def test_agendamento_com_dentista_invalido_retorna_400(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.post(
+            '/api/v1/agendamentos/',
+            {
+                'dentista': 999999,
+                'procedimento': 'Consulta',
+                'data_horario': '2030-01-11T10:00:00Z',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('dentista', response.data)
+
     def test_usuario_de_clinica_a_nao_cria_agendamento_com_procedimento_da_clinica_b(self):
         self.client.force_authenticate(self.paciente_a)
         response = self.client.post(
@@ -388,6 +435,21 @@ class MultiClinicaViewSetTest(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('procedimento_ref', response.data)
+
+    def test_payload_legacy_medico_e_rejeitado_no_agendamento(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.post(
+            '/api/v1/agendamentos/',
+            {
+                'medico': self.dentista_a.pk,
+                'procedimento': 'Consulta',
+                'data_horario': '2030-01-11T10:00:00Z',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('medico', response.data)
 
     def test_agendamento_criado_por_usuario_comum_recebe_clinica_do_usuario(self):
         self.client.force_authenticate(self.paciente_a)
@@ -406,3 +468,46 @@ class MultiClinicaViewSetTest(APITestCase):
         self.assertEqual(agendamento.clinica_id, self.clinica_a.id)
         self.assertEqual(agendamento.paciente_id, self.paciente_a.id)
         self.assertEqual(agendamento.procedimento, 'Limpeza')
+
+    def test_staff_criacao_de_dentista_com_cro_invalido_retorna_400(self):
+        usuario_dentista = criar_usuario(
+            username='dentista_cro_invalido',
+            cpf='50000000006',
+            email='dentista.invalido@example.com',
+            nome_completo='Dentista Invalido',
+            tipo='DENTISTA',
+            clinica=self.clinica_a,
+        )
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            '/api/v1/dentistas/',
+            {
+                'clinica': self.clinica_a.pk,
+                'usuario': usuario_dentista.pk,
+                'especialidade': 'Endodontia',
+                'cro': 'CRM-123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('cro', response.data)
+
+
+class DocumentacaoApiTest(APITestCase):
+    def test_schema_openapi_e_gerado_sem_erro(self):
+        response = self.client.get('/api/schema/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_docs_swagger_e_redoc_respondem(self):
+        swagger_response = self.client.get('/api/docs/')
+        redoc_response = self.client.get('/api/redoc/')
+
+        self.assertEqual(swagger_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(redoc_response.status_code, status.HTTP_200_OK)
+
+    def test_rota_inexistente_retorna_404(self):
+        response = self.client.get('/api/v1/rota-inexistente/')
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

@@ -9,6 +9,7 @@ from .serializers import AgendamentoSerializer, AlterarSenhaSerializer, ClinicaS
 
 
 class ClinicaViewSet(viewsets.ModelViewSet):
+    queryset = Clinica.objects.none()
     serializer_class = ClinicaSerializer
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['nome', 'criado_em']
@@ -20,6 +21,8 @@ class ClinicaViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Clinica.objects.none()
         usuario = self.request.user
         if usuario.is_staff:
             return Clinica.objects.all()
@@ -63,6 +66,7 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
 
 class DentistaViewSet(viewsets.ModelViewSet):
+    queryset = Dentista.objects.none()
     serializer_class = DentistaSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['especialidade', 'ativo']
@@ -75,6 +79,8 @@ class DentistaViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Dentista.objects.none()
         usuario = self.request.user
         if usuario.is_staff:
             return Dentista.objects.all()
@@ -84,6 +90,7 @@ class DentistaViewSet(viewsets.ModelViewSet):
 
 
 class ProcedimentoViewSet(viewsets.ModelViewSet):
+    queryset = Procedimento.objects.none()
     serializer_class = ProcedimentoSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['ativo']
@@ -96,6 +103,8 @@ class ProcedimentoViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Procedimento.objects.none()
         usuario = self.request.user
         if usuario.is_staff:
             return Procedimento.objects.all()
@@ -105,6 +114,7 @@ class ProcedimentoViewSet(viewsets.ModelViewSet):
 
 
 class AgendamentoViewSet(viewsets.ModelViewSet):
+    queryset = Agendamento.objects.none()
     serializer_class = AgendamentoSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.OrderingFilter]
@@ -112,6 +122,8 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     ordering = ['data_horario']
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Agendamento.objects.none()
         usuario_logado = self.request.user
         if usuario_logado.is_staff:
             return Agendamento.objects.all()

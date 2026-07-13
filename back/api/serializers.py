@@ -2,11 +2,20 @@ from datetime import date
 import re
 
 from django.contrib.auth import password_validation
+from drf_spectacular.utils import OpenApiExample, extend_schema_serializer
 from rest_framework import serializers
 
 from .models import Agendamento, Clinica, Dentista, Endereco, Procedimento, Usuario
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            'Clinica',
+            value={'id': 1, 'nome': 'Clinica Sorriso', 'cnpj': '12.345.678/0001-99', 'telefone': '82999999999', 'email': 'contato@clinica.test', 'ativa': True},
+        )
+    ]
+)
 class ClinicaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Clinica
@@ -152,6 +161,14 @@ class AlterarSenhaSerializer(serializers.Serializer):
         return value
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            'Dentista',
+            value={'id': 1, 'clinica': 1, 'usuario': 3, 'nome': 'Dra. Ana Silva', 'especialidade': 'Ortodontia', 'cro': '12345-AL', 'ativo': True},
+        )
+    ]
+)
 class DentistaSerializer(serializers.ModelSerializer):
     nome = serializers.CharField(source='usuario.get_full_name', read_only=True)
     email = serializers.EmailField(source='usuario.email', read_only=True)
@@ -161,7 +178,15 @@ class DentistaSerializer(serializers.ModelSerializer):
         model = Dentista
         fields = ['id', 'clinica', 'usuario', 'nome', 'especialidade', 'cro', 'email', 'telefone', 'disponibilidade', 'ativo']
 
+    def validate_cro(self, value):
+        cro = value.strip().upper()
+        if not re.match(r'^\d{4,6}-[A-Z]{2}$', cro):
+            raise serializers.ValidationError('CRO deve estar no formato 12345-UF.')
+        return cro
+
     def validate(self, attrs):
+        if 'crm' in self.initial_data:
+            raise serializers.ValidationError({'crm': 'Use o campo odontologico cro.'})
         usuario = attrs.get('usuario') or getattr(self.instance, 'usuario', None)
         clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
         if usuario and not clinica and usuario.clinica_id:
@@ -174,6 +199,14 @@ class DentistaSerializer(serializers.ModelSerializer):
         return attrs
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            'Procedimento',
+            value={'id': 1, 'clinica': 1, 'nome': 'Limpeza', 'descricao': 'Profilaxia odontologica', 'duracao_minutos': 30, 'ativo': True},
+        )
+    ]
+)
 class ProcedimentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Procedimento
@@ -181,7 +214,16 @@ class ProcedimentoSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'criado_em', 'atualizado_em']
 
 
+@extend_schema_serializer(
+    examples=[
+        OpenApiExample(
+            'Agendamento',
+            value={'id': 1, 'clinica': 1, 'dentista': 2, 'nome_dentista': 'Dra. Ana Silva', 'procedimento': 'Limpeza', 'data_horario': '2030-01-13T10:00:00Z', 'status': 'AGENDADO'},
+        )
+    ]
+)
 class AgendamentoSerializer(serializers.ModelSerializer):
+    dentista = serializers.PrimaryKeyRelatedField(queryset=Dentista.objects.all(), required=False)
     nome_dentista = serializers.CharField(source='dentista.usuario.get_full_name', read_only=True)
     especialidade_dentista = serializers.CharField(source='dentista.especialidade', read_only=True)
     procedimento = serializers.CharField(required=False, allow_blank=False)
@@ -194,9 +236,15 @@ class AgendamentoSerializer(serializers.ModelSerializer):
         model = Agendamento
         fields = ['id', 'clinica', 'dentista', 'nome_dentista', 'especialidade_dentista', 'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente', 'procedimento', 'procedimento_ref', 'data_horario', 'status', 'criado_em']
         read_only_fields = ['criado_em']
-        extra_kwargs = {'paciente': {'required': False}, 'clinica': {'required': False}}
+        extra_kwargs = {'paciente': {'required': False}, 'clinica': {'required': False}, 'dentista': {'required': False}}
+        validators = []
 
     def validate(self, attrs):
+        campos_legados = {'medico', 'nome_medico', 'crm'} & set(self.initial_data)
+        if campos_legados:
+            erros = {campo: 'Use o contrato odontologico oficial.' for campo in campos_legados}
+            raise serializers.ValidationError(erros)
+
         request = self.context.get('request')
         usuario = getattr(request, 'user', None)
 
@@ -204,6 +252,7 @@ class AgendamentoSerializer(serializers.ModelSerializer):
         paciente = attrs.get('paciente') or getattr(self.instance, 'paciente', None)
         procedimento_ref = attrs.get('procedimento_ref') or getattr(self.instance, 'procedimento_ref', None)
         clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+        data_horario = attrs.get('data_horario') or getattr(self.instance, 'data_horario', None)
 
         if usuario and usuario.is_authenticated and not usuario.is_staff:
             if not usuario.clinica_id:
@@ -222,8 +271,16 @@ class AgendamentoSerializer(serializers.ModelSerializer):
         if not clinica:
             raise serializers.ValidationError({'clinica': 'A clinica e obrigatoria para o agendamento.'})
 
+        if not dentista:
+            raise serializers.ValidationError({'dentista': 'Informe o dentista.'})
         if dentista and dentista.clinica_id != clinica.id:
             raise serializers.ValidationError({'dentista': 'Dentista pertence a outra clinica.'})
+        if dentista and data_horario:
+            conflito = Agendamento.objects.filter(dentista=dentista, data_horario=data_horario)
+            if self.instance:
+                conflito = conflito.exclude(pk=self.instance.pk)
+            if conflito.exists():
+                raise serializers.ValidationError({'data_horario': 'Dentista ja possui agendamento neste horario.'})
         if paciente and paciente.clinica_id and paciente.clinica_id != clinica.id:
             raise serializers.ValidationError({'paciente': 'Paciente pertence a outra clinica.'})
         if procedimento_ref and procedimento_ref.clinica_id != clinica.id:
