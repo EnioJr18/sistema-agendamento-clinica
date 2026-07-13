@@ -1,0 +1,22 @@
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+extend-exclude = ["venv", "migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.coverage.run]
+source = ["api", "core"]
+omit = [
+    "*/migrations/*",
+    "manage.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

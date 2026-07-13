@@ -80,14 +80,72 @@ Listagens usam a paginacao padrao do DRF:
 
 ## Desenvolvimento
 
-Instale as dependencias do backend:
+Variaveis principais:
+
+- `ENVIRONMENT`: `development`, `test` ou `production`
+- `SECRET_KEY`: obrigatoria em producao
+- `DEBUG`: `True` ou `False`
+- `DATABASE_URL`: URL do banco; se ausente fora de producao, usa SQLite local
+- `USE_SQLITE_FOR_TESTS`: `True` para testes locais em SQLite; `False` para usar `DATABASE_URL`
+- `ALLOWED_HOSTS`: lista separada por virgula
+- `CORS_ALLOWED_ORIGINS`: lista separada por virgula
+
+Copie `.env.example` para `.env` no desenvolvimento local e ajuste os valores.
+
+Instale as dependencias:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-Rode os testes:
+Rode migrations e servidor:
+
+```powershell
+python manage.py migrate
+python manage.py runserver
+```
+
+Rode testes:
 
 ```powershell
 python manage.py test api
 ```
+
+Lint:
+
+```powershell
+ruff check .
+```
+
+Coverage:
+
+```powershell
+coverage run manage.py test api
+coverage report
+```
+
+## Docker
+
+O compose de desenvolvimento fica em `back/docker-compose.yml` e sobe Django + PostgreSQL:
+
+```powershell
+docker compose up --build
+```
+
+O backend fica em `http://localhost:8000`.
+
+Testes usando PostgreSQL via Docker:
+
+```powershell
+docker compose run --rm -e USE_SQLITE_FOR_TESTS=False backend python manage.py test api
+```
+
+## Health check
+
+- `/api/health/`
+
+Retorna apenas estado basico da aplicacao e do banco, sem expor segredos.
+
+## CI
+
+O workflow `Backend CI` roda em push e pull request para mudancas do backend. Ele instala dependencias, sobe PostgreSQL, roda lint, verifica migrations, executa migrations, testes e coverage. Nao ha deploy configurado nesta sprint.

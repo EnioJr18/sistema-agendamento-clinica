@@ -1,5 +1,5 @@
-from datetime import date
 import re
+from datetime import date
 
 from django.contrib.auth import password_validation
 from drf_spectacular.utils import OpenApiExample, extend_schema_serializer

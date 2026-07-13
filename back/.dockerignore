@@ -1,7 +1,7 @@
 venv/
 __pycache__/
 *.py[cod]
-.env            
+.env
 db.sqlite3
 db_test.sqlite3
 .coverage
