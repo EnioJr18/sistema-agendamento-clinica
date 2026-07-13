@@ -38,6 +38,27 @@ Authorization: Bearer <access_token>
 
 Usuarios comuns acessam apenas dados da propria clinica. Staff/admin pode administrar globalmente nesta etapa.
 
+## Agenda
+
+Status oficiais de agendamento:
+
+- `AGENDADA`
+- `CONFIRMADA`
+- `EM_ATENDIMENTO`
+- `CONCLUIDA`
+- `CANCELADA`
+- `NAO_COMPARECEU`
+
+Agendamentos nao devem ser alterados por `PATCH` ou `PUT` generico. Use as acoes explicitas:
+
+- `POST /api/v1/agendamentos/{id}/cancelar/`
+- `POST /api/v1/agendamentos/{id}/reagendar/`
+- `POST /api/v1/agendamentos/{id}/confirmar/`
+- `POST /api/v1/agendamentos/{id}/concluir/`
+- `POST /api/v1/agendamentos/{id}/marcar-falta/`
+
+Conflitos de horario e sobreposicoes retornam `409 Conflict`.
+
 ## Paginacao
 
 Listagens usam a paginacao padrao do DRF:

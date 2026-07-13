@@ -1,11 +1,14 @@
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import transaction
+from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from .models import Agendamento, Clinica, Dentista, Procedimento, Usuario
-from .serializers import AgendamentoSerializer, AlterarSenhaSerializer, ClinicaSerializer, DentistaSerializer, PerfilUsuarioSerializer, ProcedimentoSerializer, RegistroUsuarioSerializer, UsuarioAdminSerializer
+from .serializers import AgendamentoSerializer, AlterarSenhaSerializer, ClinicaSerializer, DentistaSerializer, PerfilUsuarioSerializer, ProcedimentoSerializer, ReagendarAgendamentoSerializer, RegistroUsuarioSerializer, UsuarioAdminSerializer
+from .services import cancelar_agendamento, confirmar_agendamento, concluir_agendamento, marcar_falta_agendamento, reagendar_agendamento
 
 
 class ClinicaViewSet(viewsets.ModelViewSet):
@@ -121,6 +124,22 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     ordering_fields = ['data_horario', 'criado_em']
     ordering = ['data_horario']
 
+    def create(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'Use as acoes explicitas de agendamento.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'Use as acoes explicitas de agendamento.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return Agendamento.objects.none()
@@ -143,3 +162,44 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('Usuario sem clinica vinculada.')
         else:
             serializer.save(paciente=usuario_logado, clinica=usuario_logado.clinica)
+
+    def _exigir_profissional_ou_staff(self, request):
+        if request.user.is_staff or request.user.tipo == 'DENTISTA':
+            return
+        raise PermissionDenied('Paciente nao tem permissao para esta acao.')
+
+    @extend_schema(request=None, responses=AgendamentoSerializer)
+    @action(detail=True, methods=['post'])
+    def cancelar(self, request, pk=None):
+        agendamento = cancelar_agendamento(self.get_object())
+        return Response(self.get_serializer(agendamento).data)
+
+    @extend_schema(request=None, responses=AgendamentoSerializer)
+    @action(detail=True, methods=['post'])
+    def confirmar(self, request, pk=None):
+        self._exigir_profissional_ou_staff(request)
+        agendamento = confirmar_agendamento(self.get_object())
+        return Response(self.get_serializer(agendamento).data)
+
+    @extend_schema(request=None, responses=AgendamentoSerializer)
+    @action(detail=True, methods=['post'])
+    def concluir(self, request, pk=None):
+        self._exigir_profissional_ou_staff(request)
+        agendamento = concluir_agendamento(self.get_object())
+        return Response(self.get_serializer(agendamento).data)
+
+    @extend_schema(request=None, responses=AgendamentoSerializer)
+    @action(detail=True, methods=['post'], url_path='marcar-falta')
+    def marcar_falta(self, request, pk=None):
+        self._exigir_profissional_ou_staff(request)
+        agendamento = marcar_falta_agendamento(self.get_object())
+        return Response(self.get_serializer(agendamento).data)
+
+    @extend_schema(request=ReagendarAgendamentoSerializer, responses=AgendamentoSerializer)
+    @action(detail=True, methods=['post'])
+    def reagendar(self, request, pk=None):
+        agendamento = self.get_object()
+        serializer = ReagendarAgendamentoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        agendamento = reagendar_agendamento(agendamento, serializer.validated_data['data_horario'])
+        return Response(self.get_serializer(agendamento).data)

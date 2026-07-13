@@ -73,7 +73,7 @@ class Dentista(models.Model):
     especialidade = models.CharField(max_length=100)
     cro = models.CharField(max_length=20, unique=True)
     ativo = models.BooleanField(default=True)
-    disponibilidade = models.TextField(blank=True, null=True, help_text="Ex: Seg a Sex, 08h as 18h")
+    disponibilidade = models.TextField(blank=True, null=True, help_text='Ex: Seg a Sex, 08h as 18h')
 
     def __str__(self):
         return f"Dr(a). {self.usuario.get_full_name()} - {self.especialidade}"
@@ -99,10 +99,20 @@ class Procedimento(models.Model):
 
 
 class Agendamento(models.Model):
+    STATUS_AGENDADA = 'AGENDADA'
+    STATUS_CONFIRMADA = 'CONFIRMADA'
+    STATUS_EM_ATENDIMENTO = 'EM_ATENDIMENTO'
+    STATUS_CONCLUIDA = 'CONCLUIDA'
+    STATUS_CANCELADA = 'CANCELADA'
+    STATUS_NAO_COMPARECEU = 'NAO_COMPARECEU'
+
     STATUS_CHOICES = (
-        ('AGENDADO', 'Agendado'),
-        ('CANCELADO', 'Cancelado'),
-        ('CONCLUIDO', 'Concluído'),
+        (STATUS_AGENDADA, 'Agendada'),
+        (STATUS_CONFIRMADA, 'Confirmada'),
+        (STATUS_EM_ATENDIMENTO, 'Em atendimento'),
+        (STATUS_CONCLUIDA, 'Concluida'),
+        (STATUS_CANCELADA, 'Cancelada'),
+        (STATUS_NAO_COMPARECEU, 'Nao compareceu'),
     )
 
     clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='agendamentos')
@@ -111,14 +121,19 @@ class Agendamento(models.Model):
     procedimento = models.CharField(max_length=150)
     procedimento_ref = models.ForeignKey(Procedimento, on_delete=models.PROTECT, related_name='agendamentos', null=True, blank=True)
 
-    data_horario = models.DateTimeField(help_text="Data e hora da consulta")
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='AGENDADO')
+    data_horario = models.DateTimeField(help_text='Data e hora da consulta')
+    data_hora_fim = models.DateTimeField(null=True, blank=True)
+    duracao_minutos = models.PositiveSmallIntegerField(default=30)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_AGENDADA)
 
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('dentista', 'data_horario')  # Garante que um dentista não tenha dois agendamentos no mesmo horário
         ordering = ['data_horario']
+        indexes = [
+            models.Index(fields=['dentista', 'data_horario']),
+            models.Index(fields=['clinica', 'status']),
+        ]
 
     def __str__(self):
         return f"{self.paciente} com {self.dentista} em {self.data_horario}"

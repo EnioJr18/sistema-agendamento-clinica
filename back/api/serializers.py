@@ -6,6 +6,7 @@ from drf_spectacular.utils import OpenApiExample, extend_schema_serializer
 from rest_framework import serializers
 
 from .models import Agendamento, Clinica, Dentista, Endereco, Procedimento, Usuario
+from .services import validar_agendamento_criacao_ou_reagendamento
 
 
 @extend_schema_serializer(
@@ -161,6 +162,10 @@ class AlterarSenhaSerializer(serializers.Serializer):
         return value
 
 
+class ReagendarAgendamentoSerializer(serializers.Serializer):
+    data_horario = serializers.DateTimeField()
+
+
 @extend_schema_serializer(
     examples=[
         OpenApiExample(
@@ -234,8 +239,8 @@ class AgendamentoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Agendamento
-        fields = ['id', 'clinica', 'dentista', 'nome_dentista', 'especialidade_dentista', 'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente', 'procedimento', 'procedimento_ref', 'data_horario', 'status', 'criado_em']
-        read_only_fields = ['criado_em']
+        fields = ['id', 'clinica', 'dentista', 'nome_dentista', 'especialidade_dentista', 'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente', 'procedimento', 'procedimento_ref', 'data_horario', 'data_hora_fim', 'duracao_minutos', 'status', 'criado_em']
+        read_only_fields = ['criado_em', 'data_hora_fim']
         extra_kwargs = {'paciente': {'required': False}, 'clinica': {'required': False}, 'dentista': {'required': False}}
         validators = []
 
@@ -253,10 +258,14 @@ class AgendamentoSerializer(serializers.ModelSerializer):
         procedimento_ref = attrs.get('procedimento_ref') or getattr(self.instance, 'procedimento_ref', None)
         clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
         data_horario = attrs.get('data_horario') or getattr(self.instance, 'data_horario', None)
+        duracao_minutos = attrs.get('duracao_minutos') or getattr(self.instance, 'duracao_minutos', None)
+        status_agendamento = attrs.get('status')
 
         if usuario and usuario.is_authenticated and not usuario.is_staff:
             if not usuario.clinica_id:
                 raise serializers.ValidationError({'clinica': 'Usuario sem clinica vinculada.'})
+            if status_agendamento and status_agendamento != Agendamento.STATUS_AGENDADA:
+                raise serializers.ValidationError({'status': 'Usuario comum nao pode definir status do agendamento.'})
             clinica = usuario.clinica
             attrs['clinica'] = clinica
             paciente = usuario
@@ -275,12 +284,6 @@ class AgendamentoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'dentista': 'Informe o dentista.'})
         if dentista and dentista.clinica_id != clinica.id:
             raise serializers.ValidationError({'dentista': 'Dentista pertence a outra clinica.'})
-        if dentista and data_horario:
-            conflito = Agendamento.objects.filter(dentista=dentista, data_horario=data_horario)
-            if self.instance:
-                conflito = conflito.exclude(pk=self.instance.pk)
-            if conflito.exists():
-                raise serializers.ValidationError({'data_horario': 'Dentista ja possui agendamento neste horario.'})
         if paciente and paciente.clinica_id and paciente.clinica_id != clinica.id:
             raise serializers.ValidationError({'paciente': 'Paciente pertence a outra clinica.'})
         if procedimento_ref and procedimento_ref.clinica_id != clinica.id:
@@ -290,5 +293,16 @@ class AgendamentoSerializer(serializers.ModelSerializer):
             attrs['procedimento'] = procedimento_ref.nome
         if not attrs.get('procedimento') and not getattr(self.instance, 'procedimento', None):
             raise serializers.ValidationError({'procedimento': 'Informe o procedimento.'})
+
+        if data_horario:
+            duracao, fim = validar_agendamento_criacao_ou_reagendamento(
+                dentista=dentista,
+                data_horario=data_horario,
+                procedimento_ref=procedimento_ref,
+                duracao_minutos=duracao_minutos,
+                agendamento_atual=self.instance,
+            )
+            attrs['duracao_minutos'] = duracao
+            attrs['data_hora_fim'] = fim
 
         return attrs
