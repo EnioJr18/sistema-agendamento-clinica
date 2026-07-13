@@ -4,7 +4,14 @@ import re
 from django.contrib.auth import password_validation
 from rest_framework import serializers
 
-from .models import Agendamento, Dentista, Endereco, Usuario
+from .models import Agendamento, Clinica, Dentista, Endereco, Procedimento, Usuario
+
+
+class ClinicaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Clinica
+        fields = ['id', 'nome', 'cnpj', 'telefone', 'email', 'ativa', 'criado_em', 'atualizado_em']
+        read_only_fields = ['id', 'criado_em', 'atualizado_em']
 
 
 class EnderecoSerializer(serializers.ModelSerializer):
@@ -28,12 +35,13 @@ class UsuarioBaseSerializer(serializers.ModelSerializer):
             'last_name',
             'email',
             'cpf',
+            'clinica',
             'telefone',
             'data_nascimento',
             'idade',
             'endereco',
         ]
-        read_only_fields = ['id', 'username', 'idade']
+        read_only_fields = ['id', 'username', 'idade', 'clinica']
 
     def validate_email(self, value):
         email = value.strip().lower()
@@ -83,7 +91,7 @@ class RegistroUsuarioSerializer(UsuarioBaseSerializer):
 
     class Meta(UsuarioBaseSerializer.Meta):
         fields = UsuarioBaseSerializer.Meta.fields + ['password']
-        read_only_fields = ['id', 'idade']
+        read_only_fields = ['id', 'idade', 'clinica']
         extra_kwargs = {
             'nome_completo': {'required': False, 'allow_blank': False},
             'email': {'required': True, 'allow_blank': False},
@@ -127,7 +135,7 @@ class UsuarioAdminSerializer(PerfilUsuarioSerializer):
 
     class Meta(PerfilUsuarioSerializer.Meta):
         fields = PerfilUsuarioSerializer.Meta.fields + ['tipo', 'is_active']
-        read_only_fields = UsuarioBaseSerializer.Meta.read_only_fields
+        read_only_fields = ['id', 'username', 'idade']
 
 
 class AlterarSenhaSerializer(serializers.Serializer):
@@ -151,13 +159,32 @@ class DentistaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Dentista
-        fields = ['id', 'usuario', 'nome', 'especialidade', 'cro', 'email', 'telefone', 'disponibilidade', 'ativo']
+        fields = ['id', 'clinica', 'usuario', 'nome', 'especialidade', 'cro', 'email', 'telefone', 'disponibilidade', 'ativo']
+
+    def validate(self, attrs):
+        usuario = attrs.get('usuario') or getattr(self.instance, 'usuario', None)
+        clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+        if usuario and not clinica and usuario.clinica_id:
+            attrs['clinica'] = usuario.clinica
+            clinica = usuario.clinica
+        if usuario and clinica and usuario.clinica_id and usuario.clinica_id != clinica.id:
+            raise serializers.ValidationError({'usuario': 'O usuario dentista pertence a outra clinica.'})
+        if not clinica:
+            raise serializers.ValidationError({'clinica': 'A clinica e obrigatoria para o dentista.'})
+        return attrs
+
+
+class ProcedimentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Procedimento
+        fields = ['id', 'clinica', 'nome', 'descricao', 'duracao_minutos', 'ativo', 'criado_em', 'atualizado_em']
+        read_only_fields = ['id', 'criado_em', 'atualizado_em']
 
 
 class AgendamentoSerializer(serializers.ModelSerializer):
     nome_dentista = serializers.CharField(source='dentista.usuario.get_full_name', read_only=True)
     especialidade_dentista = serializers.CharField(source='dentista.especialidade', read_only=True)
-    procedimento = serializers.CharField(required=True)
+    procedimento = serializers.CharField(required=False, allow_blank=False)
     nome_paciente = serializers.CharField(source='paciente.get_full_name', read_only=True)
     email_paciente = serializers.EmailField(source='paciente.email', read_only=True)
     telefone_paciente = serializers.CharField(source='paciente.telefone', read_only=True)
@@ -165,6 +192,46 @@ class AgendamentoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Agendamento
-        fields = ['id', 'dentista', 'nome_dentista', 'especialidade_dentista', 'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente', 'procedimento', 'data_horario', 'status', 'criado_em']
+        fields = ['id', 'clinica', 'dentista', 'nome_dentista', 'especialidade_dentista', 'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente', 'procedimento', 'procedimento_ref', 'data_horario', 'status', 'criado_em']
         read_only_fields = ['criado_em']
-        extra_kwargs = {'paciente': {'required': False}}
+        extra_kwargs = {'paciente': {'required': False}, 'clinica': {'required': False}}
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        usuario = getattr(request, 'user', None)
+
+        dentista = attrs.get('dentista') or getattr(self.instance, 'dentista', None)
+        paciente = attrs.get('paciente') or getattr(self.instance, 'paciente', None)
+        procedimento_ref = attrs.get('procedimento_ref') or getattr(self.instance, 'procedimento_ref', None)
+        clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+
+        if usuario and usuario.is_authenticated and not usuario.is_staff:
+            if not usuario.clinica_id:
+                raise serializers.ValidationError({'clinica': 'Usuario sem clinica vinculada.'})
+            clinica = usuario.clinica
+            attrs['clinica'] = clinica
+            paciente = usuario
+
+        if not clinica:
+            for recurso in (dentista, paciente, procedimento_ref):
+                if recurso and getattr(recurso, 'clinica_id', None):
+                    clinica = recurso.clinica
+                    attrs['clinica'] = clinica
+                    break
+
+        if not clinica:
+            raise serializers.ValidationError({'clinica': 'A clinica e obrigatoria para o agendamento.'})
+
+        if dentista and dentista.clinica_id != clinica.id:
+            raise serializers.ValidationError({'dentista': 'Dentista pertence a outra clinica.'})
+        if paciente and paciente.clinica_id and paciente.clinica_id != clinica.id:
+            raise serializers.ValidationError({'paciente': 'Paciente pertence a outra clinica.'})
+        if procedimento_ref and procedimento_ref.clinica_id != clinica.id:
+            raise serializers.ValidationError({'procedimento_ref': 'Procedimento pertence a outra clinica.'})
+
+        if procedimento_ref and not attrs.get('procedimento'):
+            attrs['procedimento'] = procedimento_ref.nome
+        if not attrs.get('procedimento') and not getattr(self.instance, 'procedimento', None):
+            raise serializers.ValidationError({'procedimento': 'Informe o procedimento.'})
+
+        return attrs

@@ -1,10 +1,11 @@
 from django.test import TestCase
 
-from api.models import Dentista, Usuario
+from api.models import Clinica, Dentista, Usuario
 
 
 class DentistaModelTest(TestCase):
     def setUp(self):
+        self.clinica = Clinica.objects.create(nome='Clinica Teste')
         self.usuario = Usuario.objects.create_user(
             username='joaodentista',
             password='SenhaAtual123!',
@@ -14,9 +15,11 @@ class DentistaModelTest(TestCase):
             data_nascimento='1985-01-10',
             telefone='82955554444',
             tipo='DENTISTA',
+            clinica=self.clinica,
         )
 
         self.dentista = Dentista.objects.create(
+            clinica=self.clinica,
             usuario=self.usuario,
             especialidade='Ortodontia',
             cro='12345-AL',

@@ -1,10 +1,31 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from .models import Agendamento, Dentista, Usuario
-from .serializers import AgendamentoSerializer, AlterarSenhaSerializer, DentistaSerializer, PerfilUsuarioSerializer, RegistroUsuarioSerializer, UsuarioAdminSerializer
+from .models import Agendamento, Clinica, Dentista, Procedimento, Usuario
+from .serializers import AgendamentoSerializer, AlterarSenhaSerializer, ClinicaSerializer, DentistaSerializer, PerfilUsuarioSerializer, ProcedimentoSerializer, RegistroUsuarioSerializer, UsuarioAdminSerializer
+
+
+class ClinicaViewSet(viewsets.ModelViewSet):
+    serializer_class = ClinicaSerializer
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['nome', 'criado_em']
+    ordering = ['nome']
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        usuario = self.request.user
+        if usuario.is_staff:
+            return Clinica.objects.all()
+        if usuario.clinica_id:
+            return Clinica.objects.filter(pk=usuario.clinica_id)
+        return Clinica.objects.none()
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
@@ -42,7 +63,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 
 
 class DentistaViewSet(viewsets.ModelViewSet):
-    queryset = Dentista.objects.all()
     serializer_class = DentistaSerializer
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['especialidade', 'ativo']
@@ -53,6 +73,35 @@ class DentistaViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        usuario = self.request.user
+        if usuario.is_staff:
+            return Dentista.objects.all()
+        if usuario.clinica_id:
+            return Dentista.objects.filter(clinica_id=usuario.clinica_id)
+        return Dentista.objects.none()
+
+
+class ProcedimentoViewSet(viewsets.ModelViewSet):
+    serializer_class = ProcedimentoSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['ativo']
+    ordering_fields = ['nome', 'criado_em']
+    ordering = ['nome']
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        usuario = self.request.user
+        if usuario.is_staff:
+            return Procedimento.objects.all()
+        if usuario.clinica_id:
+            return Procedimento.objects.filter(clinica_id=usuario.clinica_id)
+        return Procedimento.objects.none()
 
 
 class AgendamentoViewSet(viewsets.ModelViewSet):
@@ -66,15 +115,19 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
         usuario_logado = self.request.user
         if usuario_logado.is_staff:
             return Agendamento.objects.all()
+        if not usuario_logado.clinica_id:
+            return Agendamento.objects.none()
         if usuario_logado.tipo == 'DENTISTA':
-            return Agendamento.objects.filter(dentista__usuario=usuario_logado)
+            return Agendamento.objects.filter(clinica_id=usuario_logado.clinica_id, dentista__usuario=usuario_logado)
         if usuario_logado.tipo == 'PACIENTE':
-            return Agendamento.objects.filter(paciente=usuario_logado)
+            return Agendamento.objects.filter(clinica_id=usuario_logado.clinica_id, paciente=usuario_logado)
         return Agendamento.objects.none()
 
     def perform_create(self, serializer):
         usuario_logado = self.request.user
         if usuario_logado.is_staff:
             serializer.save()
+        elif not usuario_logado.clinica_id:
+            raise PermissionDenied('Usuario sem clinica vinculada.')
         else:
-            serializer.save(paciente=usuario_logado)
+            serializer.save(paciente=usuario_logado, clinica=usuario_logado.clinica)

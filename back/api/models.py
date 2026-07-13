@@ -4,6 +4,22 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 
+class Clinica(models.Model):
+    nome = models.CharField(max_length=255)
+    cnpj = models.CharField(max_length=18, unique=True, blank=True, null=True)
+    telefone = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True)
+    ativa = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
+
 class Usuario(AbstractUser):
     TIPO_CHOICES = (
         ('DENTISTA', 'Dentista'),
@@ -14,6 +30,7 @@ class Usuario(AbstractUser):
     nome_preferido = models.CharField(max_length=150, blank=True)
     email = models.EmailField(unique=True)
     cpf = models.CharField(max_length=20, unique=True)
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='usuarios', null=True, blank=True)
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, default='PACIENTE')
     telefone = models.CharField(max_length=20)
     data_nascimento = models.DateField(null=True)
@@ -51,6 +68,7 @@ class Endereco(models.Model):
 
 
 class Dentista(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='dentistas')
     usuario = models.OneToOneField(Usuario, on_delete=models.CASCADE, related_name='perfil_dentista')
     especialidade = models.CharField(max_length=100)
     cro = models.CharField(max_length=20, unique=True)
@@ -59,7 +77,26 @@ class Dentista(models.Model):
 
     def __str__(self):
         return f"Dr(a). {self.usuario.get_full_name()} - {self.especialidade}"
-    
+
+
+class Procedimento(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='procedimentos')
+    nome = models.CharField(max_length=150)
+    descricao = models.TextField(blank=True)
+    duracao_minutos = models.PositiveSmallIntegerField(default=30)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['nome']
+        constraints = [
+            models.UniqueConstraint(fields=['clinica', 'nome'], name='procedimento_nome_unico_por_clinica'),
+        ]
+
+    def __str__(self):
+        return self.nome
+
 
 class Agendamento(models.Model):
     STATUS_CHOICES = (
@@ -68,9 +105,11 @@ class Agendamento(models.Model):
         ('CONCLUIDO', 'Concluído'),
     )
 
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='agendamentos')
     dentista = models.ForeignKey(Dentista, on_delete=models.CASCADE, related_name='agenda')
     paciente = models.ForeignKey(Usuario, on_delete=models.CASCADE, related_name='meus_agendamentos')
     procedimento = models.CharField(max_length=150)
+    procedimento_ref = models.ForeignKey(Procedimento, on_delete=models.PROTECT, related_name='agendamentos', null=True, blank=True)
 
     data_horario = models.DateTimeField(help_text="Data e hora da consulta")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='AGENDADO')

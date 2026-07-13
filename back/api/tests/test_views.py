@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import Dentista, Usuario
+from api.models import Agendamento, Clinica, Dentista, Procedimento, Usuario
 
 
 def criar_usuario(username, cpf, email, password='SenhaAtual123!', tipo='PACIENTE', **extra):
@@ -23,10 +23,12 @@ def criar_usuario(username, cpf, email, password='SenhaAtual123!', tipo='PACIENT
 
 class DentistaViewSetTest(APITestCase):
     def setUp(self):
+        self.clinica = Clinica.objects.create(nome='Clinica Teste')
         self.paciente = criar_usuario(
             username='paciente_teste',
             cpf='10000000001',
             email='paciente@example.com',
+            clinica=self.clinica,
         )
         self.user_dentista = criar_usuario(
             username='dentista_teste',
@@ -34,8 +36,10 @@ class DentistaViewSetTest(APITestCase):
             email='dentista@example.com',
             nome_completo='Ana Silva',
             tipo='DENTISTA',
+            clinica=self.clinica,
         )
         Dentista.objects.create(
+            clinica=self.clinica,
             usuario=self.user_dentista,
             especialidade='Odontopediatria',
             cro='98765-AL',
@@ -141,16 +145,20 @@ class UsuarioCadastroViewSetTest(APITestCase):
 
 class UsuarioSegurancaViewSetTest(APITestCase):
     def setUp(self):
+        self.clinica = Clinica.objects.create(nome='Clinica A')
+        self.outra_clinica = Clinica.objects.create(nome='Clinica B')
         self.usuario = criar_usuario(
             username='paciente_um',
             cpf='20000000001',
             email='paciente.um@example.com',
             nome_completo='Paciente Um',
+            clinica=self.clinica,
         )
         self.outro_usuario = criar_usuario(
             username='paciente_dois',
             cpf='20000000002',
             email='paciente.dois@example.com',
+            clinica=self.outra_clinica,
         )
         self.admin = criar_usuario(
             username='administrador',
@@ -184,6 +192,7 @@ class UsuarioSegurancaViewSetTest(APITestCase):
                 'nome_preferido': 'Paciente',
                 'telefone': '82977776666',
                 'tipo': 'ADMIN',
+                'clinica': self.outra_clinica.pk,
                 'cpf': '30000000000',
                 'password': 'TextoPuro123!',
             },
@@ -193,6 +202,7 @@ class UsuarioSegurancaViewSetTest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.usuario.refresh_from_db()
         self.assertEqual(self.usuario.tipo, 'PACIENTE')
+        self.assertEqual(self.usuario.clinica_id, self.clinica.id)
         self.assertEqual(self.usuario.cpf, cpf_original)
         self.assertEqual(self.usuario.password, senha_original)
         self.assertEqual(self.usuario.telefone, '82977776666')
@@ -244,3 +254,155 @@ class UsuarioSegurancaViewSetTest(APITestCase):
     def test_cors_nao_permite_todas_as_origens(self):
         self.assertFalse(settings.CORS_ALLOW_ALL_ORIGINS)
         self.assertIn('http://localhost:5173', settings.CORS_ALLOWED_ORIGINS)
+
+
+class MultiClinicaViewSetTest(APITestCase):
+    def setUp(self):
+        self.clinica_a = Clinica.objects.create(nome='Clinica A')
+        self.clinica_b = Clinica.objects.create(nome='Clinica B')
+        self.staff = criar_usuario(
+            username='staff',
+            cpf='50000000001',
+            email='staff@example.com',
+            is_staff=True,
+            tipo='ADMIN',
+        )
+        self.paciente_a = criar_usuario(
+            username='paciente_a',
+            cpf='50000000002',
+            email='paciente.a@example.com',
+            nome_completo='Paciente A',
+            clinica=self.clinica_a,
+        )
+        self.paciente_b = criar_usuario(
+            username='paciente_b',
+            cpf='50000000003',
+            email='paciente.b@example.com',
+            nome_completo='Paciente B',
+            clinica=self.clinica_b,
+        )
+        self.usuario_dentista_a = criar_usuario(
+            username='dentista_a',
+            cpf='50000000004',
+            email='dentista.a@example.com',
+            nome_completo='Dentista A',
+            tipo='DENTISTA',
+            clinica=self.clinica_a,
+        )
+        self.usuario_dentista_b = criar_usuario(
+            username='dentista_b',
+            cpf='50000000005',
+            email='dentista.b@example.com',
+            nome_completo='Dentista B',
+            tipo='DENTISTA',
+            clinica=self.clinica_b,
+        )
+        self.dentista_a = Dentista.objects.create(
+            clinica=self.clinica_a,
+            usuario=self.usuario_dentista_a,
+            especialidade='Ortodontia',
+            cro='CRO-A',
+        )
+        self.dentista_b = Dentista.objects.create(
+            clinica=self.clinica_b,
+            usuario=self.usuario_dentista_b,
+            especialidade='Implantodontia',
+            cro='CRO-B',
+        )
+        self.procedimento_a = Procedimento.objects.create(
+            clinica=self.clinica_a,
+            nome='Limpeza',
+            duracao_minutos=30,
+        )
+        self.procedimento_b = Procedimento.objects.create(
+            clinica=self.clinica_b,
+            nome='Clareamento',
+            duracao_minutos=45,
+        )
+        self.agendamento_b = Agendamento.objects.create(
+            clinica=self.clinica_b,
+            dentista=self.dentista_b,
+            paciente=self.paciente_b,
+            procedimento='Clareamento',
+            procedimento_ref=self.procedimento_b,
+            data_horario='2030-01-10T10:00:00Z',
+        )
+
+    def test_staff_consegue_criar_clinica(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(
+            reverse('clinica-list'),
+            {'nome': 'Clinica Nova', 'cnpj': '12.345.678/0001-99', 'telefone': '82911112222', 'email': 'nova@example.com'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(Clinica.objects.filter(nome='Clinica Nova').exists())
+
+    def test_usuario_comum_lista_apenas_sua_clinica(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.get(reverse('clinica-list'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], self.clinica_a.id)
+
+    def test_usuario_de_clinica_a_nao_acessa_dentista_da_clinica_b(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.get(reverse('dentista-detail', args=[self.dentista_b.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_usuario_de_clinica_a_recebe_404_para_agendamento_da_clinica_b(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.get(reverse('agendamento-detail', args=[self.agendamento_b.pk]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_usuario_de_clinica_a_nao_cria_agendamento_com_dentista_da_clinica_b(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.post(
+            reverse('agendamento-list'),
+            {
+                'dentista': self.dentista_b.pk,
+                'procedimento': 'Consulta',
+                'data_horario': '2030-01-11T10:00:00Z',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('dentista', response.data)
+
+    def test_usuario_de_clinica_a_nao_cria_agendamento_com_procedimento_da_clinica_b(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.post(
+            reverse('agendamento-list'),
+            {
+                'dentista': self.dentista_a.pk,
+                'procedimento_ref': self.procedimento_b.pk,
+                'data_horario': '2030-01-12T10:00:00Z',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('procedimento_ref', response.data)
+
+    def test_agendamento_criado_por_usuario_comum_recebe_clinica_do_usuario(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.post(
+            reverse('agendamento-list'),
+            {
+                'dentista': self.dentista_a.pk,
+                'procedimento_ref': self.procedimento_a.pk,
+                'data_horario': '2030-01-13T10:00:00Z',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        agendamento = Agendamento.objects.get(pk=response.data['id'])
+        self.assertEqual(agendamento.clinica_id, self.clinica_a.id)
+        self.assertEqual(agendamento.paciente_id, self.paciente_a.id)
+        self.assertEqual(agendamento.procedimento, 'Limpeza')
