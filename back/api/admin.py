@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Agendamento, Clinica, Dentista, Endereco, Procedimento, Usuario
+from .models import Agendamento, Clinica, Dentista, Endereco, HorarioFuncionamentoClinica, Procedimento, Usuario
 
 
 @admin.register(Usuario)
@@ -26,9 +26,15 @@ class UsuarioAdmin(UserAdmin):
 
 @admin.register(Clinica)
 class ClinicaAdmin(admin.ModelAdmin):
-    list_display = ('nome', 'cnpj', 'telefone', 'email', 'ativa')
-    list_filter = ('ativa',)
-    search_fields = ('nome', 'cnpj', 'email')
+    list_display = ('nome', 'slug', 'timezone', 'antecedencia_minima_cancelamento_horas', 'duracao_padrao_consulta_minutos', 'ativa')
+    list_filter = ('ativa', 'timezone')
+    search_fields = ('nome', 'slug', 'cnpj', 'email')
+
+
+@admin.register(HorarioFuncionamentoClinica)
+class HorarioFuncionamentoClinicaAdmin(admin.ModelAdmin):
+    list_display = ('clinica', 'dia_semana', 'horario_inicio', 'horario_fim', 'ativo')
+    list_filter = ('clinica', 'dia_semana', 'ativo')
 
 
 @admin.register(Dentista)

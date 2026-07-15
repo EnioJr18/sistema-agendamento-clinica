@@ -1,11 +1,12 @@
 import re
 from datetime import date
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth import password_validation
 from drf_spectacular.utils import OpenApiExample, extend_schema_serializer
 from rest_framework import serializers
 
-from .models import Agendamento, Clinica, Dentista, Endereco, Procedimento, Usuario
+from .models import Agendamento, Clinica, Dentista, Endereco, HorarioFuncionamentoClinica, Procedimento, Usuario
 from .services import validar_agendamento_criacao_ou_reagendamento
 
 
@@ -13,15 +14,101 @@ from .services import validar_agendamento_criacao_ou_reagendamento
     examples=[
         OpenApiExample(
             'Clinica',
-            value={'id': 1, 'nome': 'Clinica Sorriso', 'cnpj': '12.345.678/0001-99', 'telefone': '82999999999', 'email': 'contato@clinica.test', 'ativa': True},
+            value={
+                'id': 1,
+                'nome': 'Clinica Sorriso',
+                'slug': 'clinica-sorriso',
+                'cnpj': '12.345.678/0001-99',
+                'telefone': '82999999999',
+                'email': 'contato@clinica.test',
+                'timezone': 'America/Maceio',
+                'antecedencia_minima_cancelamento_horas': 24,
+                'duracao_padrao_consulta_minutos': 30,
+                'ativa': True,
+            },
         )
     ]
 )
 class ClinicaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Clinica
-        fields = ['id', 'nome', 'cnpj', 'telefone', 'email', 'ativa', 'criado_em', 'atualizado_em']
+        fields = [
+            'id',
+            'nome',
+            'slug',
+            'cnpj',
+            'telefone',
+            'email',
+            'timezone',
+            'antecedencia_minima_cancelamento_horas',
+            'duracao_padrao_consulta_minutos',
+            'ativa',
+            'criado_em',
+            'atualizado_em',
+        ]
         read_only_fields = ['id', 'criado_em', 'atualizado_em']
+
+    def validate_slug(self, value):
+        return value.strip().lower()
+
+    def validate_timezone(self, value):
+        timezone_name = value.strip()
+        try:
+            ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError as exc:
+            raise serializers.ValidationError('Timezone invalida.') from exc
+        return timezone_name
+
+    def validate_antecedencia_minima_cancelamento_horas(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Antecedencia minima nao pode ser negativa.')
+        return value
+
+    def validate_duracao_padrao_consulta_minutos(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Duracao padrao deve ser maior que zero.')
+        return value
+
+
+class HorarioFuncionamentoClinicaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HorarioFuncionamentoClinica
+        fields = [
+            'id',
+            'clinica',
+            'dia_semana',
+            'horario_inicio',
+            'horario_fim',
+            'ativo',
+            'criado_em',
+            'atualizado_em',
+        ]
+        read_only_fields = ['id', 'criado_em', 'atualizado_em']
+
+    def validate(self, attrs):
+        clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+        dia_semana = attrs.get('dia_semana', getattr(self.instance, 'dia_semana', None))
+        horario_inicio = attrs.get('horario_inicio', getattr(self.instance, 'horario_inicio', None))
+        horario_fim = attrs.get('horario_fim', getattr(self.instance, 'horario_fim', None))
+        ativo = attrs.get('ativo', getattr(self.instance, 'ativo', True))
+
+        if horario_inicio and horario_fim and horario_fim <= horario_inicio:
+            raise serializers.ValidationError({'horario_fim': 'Horario fim deve ser maior que horario inicio.'})
+
+        if clinica and dia_semana is not None and horario_inicio and horario_fim and ativo:
+            sobrepostos = HorarioFuncionamentoClinica.objects.filter(
+                clinica=clinica,
+                dia_semana=dia_semana,
+                ativo=True,
+                horario_inicio__lt=horario_fim,
+                horario_fim__gt=horario_inicio,
+            )
+            if self.instance:
+                sobrepostos = sobrepostos.exclude(pk=self.instance.pk)
+            if sobrepostos.exists():
+                raise serializers.ValidationError({'horario_inicio': 'Intervalo se sobrepoe a outro horario ativo da clinica.'})
+
+        return attrs
 
 
 class EnderecoSerializer(serializers.ModelSerializer):
@@ -223,7 +310,7 @@ class ProcedimentoSerializer(serializers.ModelSerializer):
     examples=[
         OpenApiExample(
             'Agendamento',
-            value={'id': 1, 'clinica': 1, 'dentista': 2, 'nome_dentista': 'Dra. Ana Silva', 'procedimento': 'Limpeza', 'data_horario': '2030-01-13T10:00:00Z', 'status': 'AGENDADO'},
+            value={'id': 1, 'clinica': 1, 'dentista': 2, 'nome_dentista': 'Dra. Ana Silva', 'procedimento': 'Limpeza', 'data_horario': '2030-01-13T10:00:00Z', 'status': 'AGENDADA'},
         )
     ]
 )
@@ -296,6 +383,7 @@ class AgendamentoSerializer(serializers.ModelSerializer):
 
         if data_horario:
             duracao, fim = validar_agendamento_criacao_ou_reagendamento(
+                clinica=clinica,
                 dentista=dentista,
                 data_horario=data_horario,
                 procedimento_ref=procedimento_ref,

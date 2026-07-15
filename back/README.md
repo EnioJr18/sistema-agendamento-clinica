@@ -31,6 +31,7 @@ Authorization: Bearer <access_token>
 ## Endpoints principais
 
 - `/api/v1/clinicas/`
+- `/api/v1/horarios-funcionamento/`
 - `/api/v1/usuarios/`
 - `/api/v1/dentistas/`
 - `/api/v1/procedimentos/`
@@ -39,6 +40,23 @@ Authorization: Bearer <access_token>
 Usuarios comuns acessam apenas dados da propria clinica. Staff/admin pode administrar globalmente nesta etapa.
 
 ## Agenda
+
+Cada clinica possui configuracoes comerciais basicas:
+
+- `slug`: identificador publico unico da clinica.
+- `timezone`: fuso usado para interpretar expediente e validacoes locais, por padrao `America/Maceio`.
+- `antecedencia_minima_cancelamento_horas`: prazo minimo para paciente cancelar um agendamento.
+- `duracao_padrao_consulta_minutos`: duracao usada quando nao ha procedimento ou duracao informada.
+
+O expediente semanal e gerenciado em `/api/v1/horarios-funcionamento/`. Staff/admin pode criar, editar e remover horarios. Usuarios comuns autenticados podem consultar apenas horarios da propria clinica.
+
+Agendamentos respeitam o timezone e o expediente ativo da clinica:
+
+- dia sem expediente retorna `400 Bad Request`;
+- inicio antes da abertura retorna `400 Bad Request`;
+- inicio depois do fechamento retorna `400 Bad Request`;
+- agendamento que termina depois do fechamento retorna `400 Bad Request`;
+- sobreposicoes com outro agendamento ativo do mesmo dentista continuam retornando `409 Conflict`.
 
 Status oficiais de agendamento:
 
@@ -58,6 +76,8 @@ Agendamentos nao devem ser alterados por `PATCH` ou `PUT` generico. Use as acoes
 - `POST /api/v1/agendamentos/{id}/marcar-falta/`
 
 Conflitos de horario e sobreposicoes retornam `409 Conflict`.
+
+Pacientes nao podem cancelar consultas fora da antecedencia minima configurada na clinica. Staff/admin pode cancelar mesmo fora desse prazo.
 
 ## Paginacao
 

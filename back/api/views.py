@@ -6,12 +6,13 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
-from .models import Agendamento, Clinica, Dentista, Procedimento, Usuario
+from .models import Agendamento, Clinica, Dentista, HorarioFuncionamentoClinica, Procedimento, Usuario
 from .serializers import (
     AgendamentoSerializer,
     AlterarSenhaSerializer,
     ClinicaSerializer,
     DentistaSerializer,
+    HorarioFuncionamentoClinicaSerializer,
     PerfilUsuarioSerializer,
     ProcedimentoSerializer,
     ReagendarAgendamentoSerializer,
@@ -48,6 +49,30 @@ class ClinicaViewSet(viewsets.ModelViewSet):
         if usuario.clinica_id:
             return Clinica.objects.filter(pk=usuario.clinica_id)
         return Clinica.objects.none()
+
+
+class HorarioFuncionamentoClinicaViewSet(viewsets.ModelViewSet):
+    queryset = HorarioFuncionamentoClinica.objects.none()
+    serializer_class = HorarioFuncionamentoClinicaSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['clinica', 'dia_semana', 'ativo']
+    ordering_fields = ['dia_semana', 'horario_inicio']
+    ordering = ['dia_semana', 'horario_inicio']
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return HorarioFuncionamentoClinica.objects.none()
+        usuario = self.request.user
+        if usuario.is_staff:
+            return HorarioFuncionamentoClinica.objects.all()
+        if usuario.clinica_id:
+            return HorarioFuncionamentoClinica.objects.filter(clinica_id=usuario.clinica_id)
+        return HorarioFuncionamentoClinica.objects.none()
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
@@ -187,7 +212,7 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     @extend_schema(request=None, responses=AgendamentoSerializer)
     @action(detail=True, methods=['post'])
     def cancelar(self, request, pk=None):
-        agendamento = cancelar_agendamento(self.get_object())
+        agendamento = cancelar_agendamento(self.get_object(), usuario=request.user)
         return Response(self.get_serializer(agendamento).data)
 
     @extend_schema(request=None, responses=AgendamentoSerializer)

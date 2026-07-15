@@ -1,11 +1,12 @@
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
 
-from .models import Agendamento
+from .models import Agendamento, HorarioFuncionamentoClinica
 
 
 class ConflitoAgenda(APIException):
@@ -28,10 +29,14 @@ STATUS_FINAIS = {
 }
 
 
-def calcular_duracao_minutos(procedimento_ref=None, duracao_minutos=None):
+def calcular_duracao_minutos(clinica=None, procedimento_ref=None, duracao_minutos=None):
     if procedimento_ref and procedimento_ref.duracao_minutos:
         return procedimento_ref.duracao_minutos
-    return duracao_minutos or 30
+    if duracao_minutos:
+        return duracao_minutos
+    if clinica and clinica.duracao_padrao_consulta_minutos:
+        return clinica.duracao_padrao_consulta_minutos
+    return 30
 
 
 def calcular_data_hora_fim(data_horario, duracao_minutos):
@@ -70,13 +75,43 @@ def validar_sobreposicao(dentista, inicio, fim, agendamento_atual=None):
             raise ConflitoAgenda('Horario se sobrepoe a outro agendamento deste dentista.')
 
 
-def preparar_janela_agendamento(data_horario, procedimento_ref=None, duracao_minutos=None):
-    duracao = calcular_duracao_minutos(procedimento_ref, duracao_minutos)
+def preparar_janela_agendamento(data_horario, clinica=None, procedimento_ref=None, duracao_minutos=None):
+    duracao = calcular_duracao_minutos(clinica, procedimento_ref, duracao_minutos)
     return duracao, calcular_data_hora_fim(data_horario, duracao)
+
+
+def validar_horario_funcionamento(clinica, inicio, fim):
+    if not clinica:
+        raise ValidationError({'clinica': 'A clinica e obrigatoria para validar o horario de funcionamento.'})
+
+    timezone_clinica = ZoneInfo(clinica.timezone)
+    inicio_local = timezone.localtime(inicio, timezone_clinica)
+    fim_local = timezone.localtime(fim, timezone_clinica)
+
+    if inicio_local.date() != fim_local.date():
+        raise ValidationError({'data_horario': 'Agendamento deve iniciar e terminar no mesmo dia local da clinica.'})
+
+    horarios = HorarioFuncionamentoClinica.objects.filter(
+        clinica=clinica,
+        dia_semana=inicio_local.weekday(),
+        ativo=True,
+    )
+
+    if not horarios.exists():
+        raise ValidationError({'data_horario': 'Clinica nao possui expediente ativo neste dia.'})
+
+    inicio_hora = inicio_local.time()
+    fim_hora = fim_local.time()
+    for horario in horarios:
+        if horario.horario_inicio <= inicio_hora and fim_hora <= horario.horario_fim:
+            return
+
+    raise ValidationError({'data_horario': 'Agendamento fora do horario de funcionamento da clinica.'})
 
 
 def validar_agendamento_criacao_ou_reagendamento(
     *,
+    clinica,
     dentista,
     data_horario,
     procedimento_ref=None,
@@ -85,14 +120,20 @@ def validar_agendamento_criacao_ou_reagendamento(
 ):
     validar_data_futura(data_horario)
     validar_recursos_ativos(dentista, procedimento_ref)
-    duracao, fim = preparar_janela_agendamento(data_horario, procedimento_ref, duracao_minutos)
+    duracao, fim = preparar_janela_agendamento(data_horario, clinica, procedimento_ref, duracao_minutos)
+    validar_horario_funcionamento(clinica, data_horario, fim)
     validar_sobreposicao(dentista, data_horario, fim, agendamento_atual)
     return duracao, fim
 
 
-def cancelar_agendamento(agendamento):
+def cancelar_agendamento(agendamento, usuario=None):
     if agendamento.status in {Agendamento.STATUS_CANCELADA, Agendamento.STATUS_CONCLUIDA}:
         raise ValidationError({'status': 'Agendamento concluido ou cancelado nao pode ser cancelado.'})
+    if usuario and not usuario.is_staff and usuario.tipo == 'PACIENTE':
+        antecedencia = agendamento.clinica.antecedencia_minima_cancelamento_horas
+        limite_cancelamento = timezone.now() + timedelta(hours=antecedencia)
+        if agendamento.data_horario < limite_cancelamento:
+            raise ValidationError({'data_horario': 'Cancelamento fora da antecedencia minima da clinica.'})
     agendamento.status = Agendamento.STATUS_CANCELADA
     agendamento.save(update_fields=['status'])
     return agendamento
@@ -129,6 +170,7 @@ def reagendar_agendamento(agendamento, nova_data_horario):
         raise ValidationError({'status': 'Agendamento cancelado ou concluido nao pode ser reagendado.'})
     with transaction.atomic():
         duracao, fim = validar_agendamento_criacao_ou_reagendamento(
+            clinica=agendamento.clinica,
             dentista=agendamento.dentista,
             data_horario=nova_data_horario,
             procedimento_ref=agendamento.procedimento_ref,

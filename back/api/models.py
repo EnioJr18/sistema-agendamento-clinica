@@ -1,14 +1,20 @@
 from datetime import date
 
 from django.contrib.auth.models import AbstractUser
+from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils.text import slugify
 
 
 class Clinica(models.Model):
     nome = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=120, unique=True, blank=True)
     cnpj = models.CharField(max_length=18, unique=True, blank=True, null=True)
     telefone = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
+    timezone = models.CharField(max_length=64, default='America/Maceio')
+    antecedencia_minima_cancelamento_horas = models.PositiveSmallIntegerField(default=24)
+    duracao_padrao_consulta_minutos = models.PositiveSmallIntegerField(default=30, validators=[MinValueValidator(1)])
     ativa = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
@@ -18,6 +24,64 @@ class Clinica(models.Model):
 
     def __str__(self):
         return self.nome
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.nome) or 'clinica'
+            candidato = base[:120]
+            contador = 2
+            queryset = type(self).objects.all()
+            if self.pk:
+                queryset = queryset.exclude(pk=self.pk)
+            while queryset.filter(slug=candidato).exists():
+                sufixo = f'-{contador}'
+                candidato = f'{base[:120 - len(sufixo)]}{sufixo}'
+                contador += 1
+            self.slug = candidato
+        super().save(*args, **kwargs)
+
+
+class HorarioFuncionamentoClinica(models.Model):
+    DIA_SEGUNDA = 0
+    DIA_TERCA = 1
+    DIA_QUARTA = 2
+    DIA_QUINTA = 3
+    DIA_SEXTA = 4
+    DIA_SABADO = 5
+    DIA_DOMINGO = 6
+
+    DIA_SEMANA_CHOICES = (
+        (DIA_SEGUNDA, 'Segunda-feira'),
+        (DIA_TERCA, 'Terca-feira'),
+        (DIA_QUARTA, 'Quarta-feira'),
+        (DIA_QUINTA, 'Quinta-feira'),
+        (DIA_SEXTA, 'Sexta-feira'),
+        (DIA_SABADO, 'Sabado'),
+        (DIA_DOMINGO, 'Domingo'),
+    )
+
+    clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, related_name='horarios_funcionamento')
+    dia_semana = models.PositiveSmallIntegerField(choices=DIA_SEMANA_CHOICES)
+    horario_inicio = models.TimeField()
+    horario_fim = models.TimeField()
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['clinica', 'dia_semana', 'horario_inicio']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['clinica', 'dia_semana', 'horario_inicio', 'horario_fim'],
+                name='horario_funcionamento_unico_por_intervalo',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['clinica', 'dia_semana', 'ativo']),
+        ]
+
+    def __str__(self):
+        return f'{self.clinica} - {self.get_dia_semana_display()} {self.horario_inicio}-{self.horario_fim}'
 
 
 class Usuario(AbstractUser):
