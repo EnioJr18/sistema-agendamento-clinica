@@ -141,6 +141,8 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv(),
 )
 
+FRONTEND_BASE_URL = config('FRONTEND_BASE_URL', default='').rstrip('/')
+
 AUTH_USER_MODEL = 'api.Usuario'
 
 REST_FRAMEWORK = {

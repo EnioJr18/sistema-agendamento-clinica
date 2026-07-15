@@ -1,7 +1,18 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Agendamento, Clinica, Dentista, Endereco, HorarioFuncionamentoClinica, Procedimento, Usuario
+from .models import (
+    Agendamento,
+    BloqueioAgendaClinica,
+    Clinica,
+    ConviteCadastroPaciente,
+    Dentista,
+    Endereco,
+    HorarioFuncionamentoClinica,
+    IndisponibilidadeDentista,
+    Procedimento,
+    Usuario,
+)
 
 
 @admin.register(Usuario)
@@ -37,11 +48,33 @@ class HorarioFuncionamentoClinicaAdmin(admin.ModelAdmin):
     list_filter = ('clinica', 'dia_semana', 'ativo')
 
 
+@admin.register(BloqueioAgendaClinica)
+class BloqueioAgendaClinicaAdmin(admin.ModelAdmin):
+    list_display = ('clinica', 'inicio', 'fim', 'motivo', 'ativo')
+    list_filter = ('clinica', 'ativo', 'inicio', 'fim')
+    search_fields = ('clinica__nome', 'motivo')
+
+
 @admin.register(Dentista)
 class DentistaAdmin(admin.ModelAdmin):
     list_display = ('usuario', 'clinica', 'especialidade', 'cro', 'ativo')
     list_filter = ('clinica', 'ativo', 'especialidade')
     search_fields = ('usuario__nome_completo', 'cro', 'especialidade')
+
+
+@admin.register(IndisponibilidadeDentista)
+class IndisponibilidadeDentistaAdmin(admin.ModelAdmin):
+    list_display = ('dentista', 'clinica', 'inicio', 'fim', 'motivo', 'ativo')
+    list_filter = ('clinica', 'dentista', 'ativo', 'inicio', 'fim')
+    search_fields = ('dentista__usuario__nome_completo', 'clinica__nome', 'motivo')
+
+
+@admin.register(ConviteCadastroPaciente)
+class ConviteCadastroPacienteAdmin(admin.ModelAdmin):
+    list_display = ('clinica', 'nome_destino', 'telefone_destino', 'email_destino', 'expira_em', 'usado_em', 'ativo', 'criado_por')
+    list_filter = ('clinica', 'ativo', 'expira_em', 'usado_em', 'criado_por')
+    search_fields = ('nome_destino', 'telefone_destino', 'email_destino', 'clinica__nome', 'criado_por__username')
+    readonly_fields = ('token', 'usado_em', 'criado_em', 'atualizado_em')
 
 
 @admin.register(Procedimento)

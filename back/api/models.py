@@ -1,8 +1,10 @@
-from datetime import date
+import secrets
+from datetime import date, timedelta
 
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 from django.utils.text import slugify
 
 
@@ -84,6 +86,25 @@ class HorarioFuncionamentoClinica(models.Model):
         return f'{self.clinica} - {self.get_dia_semana_display()} {self.horario_inicio}-{self.horario_fim}'
 
 
+class BloqueioAgendaClinica(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, related_name='bloqueios_agenda')
+    inicio = models.DateTimeField()
+    fim = models.DateTimeField()
+    motivo = models.CharField(max_length=255, blank=True)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['inicio']
+        indexes = [
+            models.Index(fields=['clinica', 'ativo', 'inicio', 'fim']),
+        ]
+
+    def __str__(self):
+        return f'{self.clinica} bloqueada de {self.inicio} ate {self.fim}'
+
+
 class Usuario(AbstractUser):
     TIPO_CHOICES = (
         ('DENTISTA', 'Dentista'),
@@ -131,6 +152,43 @@ class Endereco(models.Model):
         return ', '.join([parte for parte in partes if parte])
 
 
+def gerar_token_convite():
+    return secrets.token_urlsafe(32)
+
+
+def expiracao_padrao_convite():
+    return timezone.now() + timedelta(days=7)
+
+
+class ConviteCadastroPaciente(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, related_name='convites_cadastro_paciente')
+    token = models.CharField(max_length=64, unique=True, default=gerar_token_convite, editable=False)
+    telefone_destino = models.CharField(max_length=20, blank=True)
+    email_destino = models.EmailField(blank=True)
+    nome_destino = models.CharField(max_length=255, blank=True)
+    expira_em = models.DateTimeField(default=expiracao_padrao_convite)
+    usado_em = models.DateTimeField(null=True, blank=True)
+    ativo = models.BooleanField(default=True)
+    criado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        related_name='convites_cadastro_criados',
+        null=True,
+        blank=True,
+    )
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+        indexes = [
+            models.Index(fields=['clinica', 'ativo', 'expira_em', 'usado_em']),
+        ]
+
+    def __str__(self):
+        return f'Convite para {self.clinica} ({self.expira_em:%Y-%m-%d %H:%M})'
+
+
 class Dentista(models.Model):
     clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='dentistas')
     usuario = models.OneToOneField(Usuario, on_delete=models.CASCADE, related_name='perfil_dentista')
@@ -141,6 +199,26 @@ class Dentista(models.Model):
 
     def __str__(self):
         return f"Dr(a). {self.usuario.get_full_name()} - {self.especialidade}"
+
+
+class IndisponibilidadeDentista(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, related_name='indisponibilidades_dentistas')
+    dentista = models.ForeignKey(Dentista, on_delete=models.CASCADE, related_name='indisponibilidades')
+    inicio = models.DateTimeField()
+    fim = models.DateTimeField()
+    motivo = models.CharField(max_length=255, blank=True)
+    ativo = models.BooleanField(default=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['inicio']
+        indexes = [
+            models.Index(fields=['clinica', 'dentista', 'ativo', 'inicio', 'fim']),
+        ]
+
+    def __str__(self):
+        return f'{self.dentista} indisponivel de {self.inicio} ate {self.fim}'
 
 
 class Procedimento(models.Model):

@@ -32,6 +32,9 @@ Authorization: Bearer <access_token>
 
 - `/api/v1/clinicas/`
 - `/api/v1/horarios-funcionamento/`
+- `/api/v1/bloqueios-agenda/`
+- `/api/v1/indisponibilidades-dentistas/`
+- `/api/v1/convites-pacientes/`
 - `/api/v1/usuarios/`
 - `/api/v1/dentistas/`
 - `/api/v1/procedimentos/`
@@ -50,12 +53,20 @@ Cada clinica possui configuracoes comerciais basicas:
 
 O expediente semanal e gerenciado em `/api/v1/horarios-funcionamento/`. Staff/admin pode criar, editar e remover horarios. Usuarios comuns autenticados podem consultar apenas horarios da propria clinica.
 
+Bloqueios manuais da agenda da clinica sao gerenciados em `/api/v1/bloqueios-agenda/`. Eles representam fechamentos, manutencoes, feriados locais ou outros intervalos em que a clinica nao atende.
+
+Indisponibilidades de dentistas sao gerenciadas em `/api/v1/indisponibilidades-dentistas/`. Elas representam ferias, afastamentos ou intervalos em que um dentista especifico nao atende.
+
+Na fase atual, escrita nesses endpoints e administrativa. Usuarios comuns autenticados podem consultar apenas registros vinculados a propria clinica.
+
 Agendamentos respeitam o timezone e o expediente ativo da clinica:
 
 - dia sem expediente retorna `400 Bad Request`;
 - inicio antes da abertura retorna `400 Bad Request`;
 - inicio depois do fechamento retorna `400 Bad Request`;
 - agendamento que termina depois do fechamento retorna `400 Bad Request`;
+- agendamento durante bloqueio ativo da clinica retorna `409 Conflict`;
+- agendamento durante indisponibilidade ativa do dentista retorna `409 Conflict`;
 - sobreposicoes com outro agendamento ativo do mesmo dentista continuam retornando `409 Conflict`.
 
 Status oficiais de agendamento:
@@ -78,6 +89,36 @@ Agendamentos nao devem ser alterados por `PATCH` ou `PUT` generico. Use as acoes
 Conflitos de horario e sobreposicoes retornam `409 Conflict`.
 
 Pacientes nao podem cancelar consultas fora da antecedencia minima configurada na clinica. Staff/admin pode cancelar mesmo fora desse prazo.
+
+## Cadastro publico por clinica
+
+Pacientes podem ser cadastrados em contexto de clinica pelo slug:
+
+- `POST /api/v1/clinicas/{slug}/pacientes/`
+
+Esse endpoint e publico e sempre cria usuario `PACIENTE`, vinculado automaticamente a clinica do slug. Campos `tipo` e `clinica` enviados no payload nao permitem elevacao de privilegio nem troca de contexto.
+
+Clinicas inativas rejeitam cadastro publico. Slugs inexistentes retornam `404 Not Found`.
+
+## Convites de cadastro de pacientes
+
+Staff/admin gera convites em `POST /api/v1/convites-pacientes/` para uma clinica ativa. A resposta de criacao retorna o token e o endpoint publico de consumo:
+
+- `POST /api/v1/convites-pacientes/{token}/cadastrar/`
+
+O convite e de uso unico, possui expiracao e vincula o paciente automaticamente a clinica que o gerou. O cadastro por token continua criando apenas usuarios `PACIENTE`; campos `tipo` e `clinica` no payload nao alteram privilegios nem contexto.
+
+Fluxo atual:
+
+1. A recepcao gera o convite.
+2. O sistema retorna token e link/endpoint de cadastro.
+3. A recepcao copia e envia o link manualmente ao paciente.
+4. O paciente conclui o cadastro.
+5. O convite recebe `usado_em` e nao pode ser reutilizado.
+
+`FRONTEND_BASE_URL`, quando configurada, permite retornar um link amigavel no formato `/cadastro?convite={token}`. Sem essa variavel, a resposta retorna o endpoint publico da API. O frontend atual nao foi alterado para consumir esse parametro.
+
+Envio real por WhatsApp, e-mail ou qualquer integracao externa ainda nao esta implementado nesta sprint.
 
 ## Paginacao
 
@@ -109,6 +150,7 @@ Variaveis principais:
 - `USE_SQLITE_FOR_TESTS`: `True` para testes locais em SQLite; `False` para usar `DATABASE_URL`
 - `ALLOWED_HOSTS`: lista separada por virgula
 - `CORS_ALLOWED_ORIGINS`: lista separada por virgula
+- `FRONTEND_BASE_URL`: URL base opcional para montar link amigavel de convite
 
 Copie `.env.example` para `.env` no desenvolvimento local e ajuste os valores.
 

@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
 
-from .models import Agendamento, HorarioFuncionamentoClinica
+from .models import Agendamento, BloqueioAgendaClinica, HorarioFuncionamentoClinica, IndisponibilidadeDentista
 
 
 class ConflitoAgenda(APIException):
@@ -109,6 +109,27 @@ def validar_horario_funcionamento(clinica, inicio, fim):
     raise ValidationError({'data_horario': 'Agendamento fora do horario de funcionamento da clinica.'})
 
 
+def validar_bloqueios_e_indisponibilidades(clinica, dentista, inicio, fim):
+    bloqueio = BloqueioAgendaClinica.objects.filter(
+        clinica=clinica,
+        ativo=True,
+        inicio__lt=fim,
+        fim__gt=inicio,
+    ).exists()
+    if bloqueio:
+        raise ConflitoAgenda('Horario bloqueado para esta clinica.')
+
+    indisponibilidade = IndisponibilidadeDentista.objects.filter(
+        clinica=clinica,
+        dentista=dentista,
+        ativo=True,
+        inicio__lt=fim,
+        fim__gt=inicio,
+    ).exists()
+    if indisponibilidade:
+        raise ConflitoAgenda('Dentista indisponivel neste horario.')
+
+
 def validar_agendamento_criacao_ou_reagendamento(
     *,
     clinica,
@@ -122,6 +143,7 @@ def validar_agendamento_criacao_ou_reagendamento(
     validar_recursos_ativos(dentista, procedimento_ref)
     duracao, fim = preparar_janela_agendamento(data_horario, clinica, procedimento_ref, duracao_minutos)
     validar_horario_funcionamento(clinica, data_horario, fim)
+    validar_bloqueios_e_indisponibilidades(clinica, dentista, data_horario, fim)
     validar_sobreposicao(dentista, data_horario, fim, agendamento_atual)
     return duracao, fim
 

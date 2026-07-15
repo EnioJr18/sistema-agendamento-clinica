@@ -6,7 +6,18 @@ from django.contrib.auth import password_validation
 from drf_spectacular.utils import OpenApiExample, extend_schema_serializer
 from rest_framework import serializers
 
-from .models import Agendamento, Clinica, Dentista, Endereco, HorarioFuncionamentoClinica, Procedimento, Usuario
+from .models import (
+    Agendamento,
+    BloqueioAgendaClinica,
+    Clinica,
+    ConviteCadastroPaciente,
+    Dentista,
+    Endereco,
+    HorarioFuncionamentoClinica,
+    IndisponibilidadeDentista,
+    Procedimento,
+    Usuario,
+)
 from .services import validar_agendamento_criacao_ou_reagendamento
 
 
@@ -111,6 +122,42 @@ class HorarioFuncionamentoClinicaSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class BloqueioAgendaClinicaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BloqueioAgendaClinica
+        fields = ['id', 'clinica', 'inicio', 'fim', 'motivo', 'ativo', 'criado_em', 'atualizado_em']
+        read_only_fields = ['id', 'criado_em', 'atualizado_em']
+
+    def validate(self, attrs):
+        inicio = attrs.get('inicio', getattr(self.instance, 'inicio', None))
+        fim = attrs.get('fim', getattr(self.instance, 'fim', None))
+
+        if inicio and fim and fim <= inicio:
+            raise serializers.ValidationError({'fim': 'Fim deve ser maior que inicio.'})
+
+        return attrs
+
+
+class IndisponibilidadeDentistaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IndisponibilidadeDentista
+        fields = ['id', 'clinica', 'dentista', 'inicio', 'fim', 'motivo', 'ativo', 'criado_em', 'atualizado_em']
+        read_only_fields = ['id', 'criado_em', 'atualizado_em']
+
+    def validate(self, attrs):
+        clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+        dentista = attrs.get('dentista') or getattr(self.instance, 'dentista', None)
+        inicio = attrs.get('inicio', getattr(self.instance, 'inicio', None))
+        fim = attrs.get('fim', getattr(self.instance, 'fim', None))
+
+        if inicio and fim and fim <= inicio:
+            raise serializers.ValidationError({'fim': 'Fim deve ser maior que inicio.'})
+        if dentista and clinica and dentista.clinica_id != clinica.id:
+            raise serializers.ValidationError({'dentista': 'Dentista pertence a outra clinica.'})
+
+        return attrs
+
+
 class EnderecoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Endereco
@@ -204,6 +251,10 @@ class RegistroUsuarioSerializer(UsuarioBaseSerializer):
             attrs['nome_completo'] = nome_compat or attrs.get('username', '')
         return attrs
 
+    def validate_password(self, value):
+        password_validation.validate_password(value)
+        return value
+
     def create(self, validated_data):
         endereco_data = validated_data.pop('endereco', serializers.empty)
         password = validated_data.pop('password')
@@ -212,6 +263,54 @@ class RegistroUsuarioSerializer(UsuarioBaseSerializer):
         user.save()
         self._save_endereco(user, endereco_data)
         return user
+
+
+class CadastroViaConviteSerializer(RegistroUsuarioSerializer):
+    """Cadastro publico de paciente consumindo um convite valido."""
+
+
+class ConviteCadastroPacienteSerializer(serializers.ModelSerializer):
+    pode_ser_consumido = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ConviteCadastroPaciente
+        fields = [
+            'id',
+            'clinica',
+            'telefone_destino',
+            'email_destino',
+            'nome_destino',
+            'expira_em',
+            'usado_em',
+            'ativo',
+            'criado_por',
+            'criado_em',
+            'atualizado_em',
+            'pode_ser_consumido',
+        ]
+        read_only_fields = [
+            'id',
+            'usado_em',
+            'criado_por',
+            'criado_em',
+            'atualizado_em',
+            'pode_ser_consumido',
+        ]
+
+    def get_pode_ser_consumido(self, convite):
+        return convite.ativo and convite.usado_em is None and convite.expira_em > timezone.now() and convite.clinica.ativa
+
+    def validate(self, attrs):
+        clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+        expira_em = attrs.get('expira_em') or getattr(self.instance, 'expira_em', None)
+
+        if self.instance is None:
+            if clinica and not clinica.ativa:
+                raise serializers.ValidationError({'clinica': 'Clinica inativa nao permite gerar convites.'})
+            if expira_em and expira_em <= timezone.now():
+                raise serializers.ValidationError({'expira_em': 'A expiracao deve estar no futuro.'})
+
+        return attrs
 
 
 class PerfilUsuarioSerializer(UsuarioBaseSerializer):

@@ -1,18 +1,35 @@
 from django.db import transaction
+from django.conf import settings
+from django.urls import reverse
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from .models import Agendamento, Clinica, Dentista, HorarioFuncionamentoClinica, Procedimento, Usuario
+from .models import (
+    Agendamento,
+    BloqueioAgendaClinica,
+    Clinica,
+    ConviteCadastroPaciente,
+    Dentista,
+    HorarioFuncionamentoClinica,
+    IndisponibilidadeDentista,
+    Procedimento,
+    Usuario,
+)
 from .serializers import (
     AgendamentoSerializer,
     AlterarSenhaSerializer,
+    BloqueioAgendaClinicaSerializer,
+    CadastroViaConviteSerializer,
     ClinicaSerializer,
+    ConviteCadastroPacienteSerializer,
     DentistaSerializer,
     HorarioFuncionamentoClinicaSerializer,
+    IndisponibilidadeDentistaSerializer,
     PerfilUsuarioSerializer,
     ProcedimentoSerializer,
     ReagendarAgendamentoSerializer,
@@ -36,6 +53,8 @@ class ClinicaViewSet(viewsets.ModelViewSet):
     ordering = ['nome']
 
     def get_permissions(self):
+        if self.action == 'cadastrar_paciente':
+            return [permissions.AllowAny()]
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
@@ -49,6 +68,21 @@ class ClinicaViewSet(viewsets.ModelViewSet):
         if usuario.clinica_id:
             return Clinica.objects.filter(pk=usuario.clinica_id)
         return Clinica.objects.none()
+
+    @extend_schema(request=RegistroUsuarioSerializer, responses=RegistroUsuarioSerializer)
+    @action(detail=False, methods=['post'], url_path=r'(?P<slug>[-a-zA-Z0-9_]+)/pacientes')
+    def cadastrar_paciente(self, request, slug=None):
+        try:
+            clinica = Clinica.objects.get(slug=slug)
+        except Clinica.DoesNotExist:
+            return Response({'detail': 'Clinica nao encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        if not clinica.ativa:
+            raise ValidationError({'clinica': 'Clinica inativa nao permite cadastro publico.'})
+
+        serializer = RegistroUsuarioSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        usuario = serializer.save(clinica=clinica)
+        return Response(RegistroUsuarioSerializer(usuario, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 
 class HorarioFuncionamentoClinicaViewSet(viewsets.ModelViewSet):
@@ -73,6 +107,128 @@ class HorarioFuncionamentoClinicaViewSet(viewsets.ModelViewSet):
         if usuario.clinica_id:
             return HorarioFuncionamentoClinica.objects.filter(clinica_id=usuario.clinica_id)
         return HorarioFuncionamentoClinica.objects.none()
+
+
+class BloqueioAgendaClinicaViewSet(viewsets.ModelViewSet):
+    queryset = BloqueioAgendaClinica.objects.none()
+    serializer_class = BloqueioAgendaClinicaSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['clinica', 'ativo']
+    ordering_fields = ['inicio', 'fim', 'criado_em']
+    ordering = ['inicio']
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return BloqueioAgendaClinica.objects.none()
+        usuario = self.request.user
+        if usuario.is_staff:
+            return BloqueioAgendaClinica.objects.all()
+        if usuario.clinica_id:
+            return BloqueioAgendaClinica.objects.filter(clinica_id=usuario.clinica_id)
+        return BloqueioAgendaClinica.objects.none()
+
+
+class IndisponibilidadeDentistaViewSet(viewsets.ModelViewSet):
+    queryset = IndisponibilidadeDentista.objects.none()
+    serializer_class = IndisponibilidadeDentistaSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['clinica', 'dentista', 'ativo']
+    ordering_fields = ['inicio', 'fim', 'criado_em']
+    ordering = ['inicio']
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return IndisponibilidadeDentista.objects.none()
+        usuario = self.request.user
+        if usuario.is_staff:
+            return IndisponibilidadeDentista.objects.all()
+        if usuario.clinica_id:
+            return IndisponibilidadeDentista.objects.filter(clinica_id=usuario.clinica_id)
+        return IndisponibilidadeDentista.objects.none()
+
+
+class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
+    queryset = ConviteCadastroPaciente.objects.none()
+    serializer_class = ConviteCadastroPacienteSerializer
+    lookup_field = 'token'
+    lookup_value_regex = '[-_a-zA-Z0-9]+'
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['clinica', 'ativo']
+    ordering_fields = ['expira_em', 'criado_em', 'usado_em']
+    ordering = ['-criado_em']
+
+    def get_permissions(self):
+        if self.action == 'cadastrar':
+            return [permissions.AllowAny()]
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ConviteCadastroPaciente.objects.none()
+        usuario = self.request.user
+        if usuario.is_staff:
+            return ConviteCadastroPaciente.objects.select_related('clinica', 'criado_por')
+        if usuario.clinica_id:
+            return ConviteCadastroPaciente.objects.select_related('clinica', 'criado_por').filter(clinica_id=usuario.clinica_id)
+        return ConviteCadastroPaciente.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        convite = serializer.save(criado_por=request.user)
+        dados = self.get_serializer(convite).data
+        endpoint_cadastro = request.build_absolute_uri(
+            reverse('convite-paciente-cadastrar', kwargs={'token': convite.token})
+        )
+        frontend_base_url = getattr(settings, 'FRONTEND_BASE_URL', '')
+        dados['token'] = convite.token
+        dados['endpoint_cadastro'] = endpoint_cadastro
+        dados['link_cadastro'] = (
+            f'{frontend_base_url}/cadastro?convite={convite.token}'
+            if frontend_base_url
+            else endpoint_cadastro
+        )
+        headers = self.get_success_headers(dados)
+        return Response(dados, status=status.HTTP_201_CREATED, headers=headers)
+
+    @extend_schema(request=CadastroViaConviteSerializer, responses=RegistroUsuarioSerializer)
+    @action(detail=True, methods=['post'], url_path='cadastrar')
+    def cadastrar(self, request, token=None):
+        serializer = CadastroViaConviteSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            try:
+                convite = ConviteCadastroPaciente.objects.select_for_update().select_related('clinica').get(token=token)
+            except ConviteCadastroPaciente.DoesNotExist:
+                return Response({'detail': 'Convite nao encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+            if not convite.clinica.ativa:
+                raise ValidationError({'clinica': 'Clinica inativa nao permite cadastro por convite.'})
+            if not convite.ativo:
+                raise ValidationError({'convite': 'Convite inativo.'})
+            if convite.usado_em is not None:
+                raise ValidationError({'convite': 'Convite ja utilizado.'})
+            if convite.expira_em <= timezone.now():
+                raise ValidationError({'convite': 'Convite expirado.'})
+
+            usuario = serializer.save(clinica=convite.clinica)
+            convite.usado_em = timezone.now()
+            convite.save(update_fields=['usado_em', 'atualizado_em'])
+
+        return Response(RegistroUsuarioSerializer(usuario, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):

@@ -7,7 +7,16 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import Agendamento, Clinica, Dentista, HorarioFuncionamentoClinica, Procedimento, Usuario
+from api.models import (
+    Agendamento,
+    BloqueioAgendaClinica,
+    Clinica,
+    Dentista,
+    HorarioFuncionamentoClinica,
+    IndisponibilidadeDentista,
+    Procedimento,
+    Usuario,
+)
 
 
 def criar_usuario(username, cpf, email, password='SenhaAtual123!', tipo='PACIENTE', **extra):
@@ -768,6 +777,227 @@ class ConfiguracoesComerciaisClinicaTest(APITestCase):
         self.assertIn('data_horario', response.data)
 
 
+class BloqueiosIndisponibilidadesCadastroSlugTest(APITestCase):
+    def setUp(self):
+        self.clinica_a = Clinica.objects.create(nome='Sprint Sete A', slug='sprint-sete-a')
+        self.clinica_b = Clinica.objects.create(nome='Sprint Sete B', slug='sprint-sete-b')
+        self.clinica_inativa = Clinica.objects.create(nome='Sprint Sete Inativa', slug='sprint-sete-inativa', ativa=False)
+        criar_expediente(self.clinica_a, inicio=time(8, 0), fim=time(18, 0))
+        criar_expediente(self.clinica_b, inicio=time(8, 0), fim=time(18, 0))
+        self.staff = criar_usuario('sprint7_staff', '80000000001', 'sprint7.staff@example.com', tipo='ADMIN', is_staff=True)
+        self.paciente_a = criar_usuario('sprint7_paciente_a', '80000000002', 'sprint7.paciente.a@example.com', clinica=self.clinica_a)
+        self.paciente_b = criar_usuario('sprint7_paciente_b', '80000000003', 'sprint7.paciente.b@example.com', clinica=self.clinica_b)
+        self.usuario_dentista_a = criar_usuario('sprint7_dentista_a', '80000000004', 'sprint7.dentista.a@example.com', tipo='DENTISTA', clinica=self.clinica_a)
+        self.usuario_dentista_b = criar_usuario('sprint7_dentista_b', '80000000005', 'sprint7.dentista.b@example.com', tipo='DENTISTA', clinica=self.clinica_b)
+        self.dentista_a = Dentista.objects.create(clinica=self.clinica_a, usuario=self.usuario_dentista_a, especialidade='Ortodontia', cro='77777-AL')
+        self.dentista_b = Dentista.objects.create(clinica=self.clinica_b, usuario=self.usuario_dentista_b, especialidade='Endodontia', cro='88888-AL')
+        self.procedimento_a = Procedimento.objects.create(clinica=self.clinica_a, nome='Consulta sprint 7', duracao_minutos=30)
+
+    def payload_cadastro_slug(self, **overrides):
+        payload = {
+            'username': 'paciente_slug',
+            'password': 'SenhaForte123!',
+            'nome_completo': 'Paciente Slug',
+            'email': 'paciente.slug@example.com',
+            'cpf': '987.654.321-00',
+            'data_nascimento': '1992-06-10',
+            'telefone': '82999991111',
+        }
+        payload.update(overrides)
+        return payload
+
+    def payload_agendamento(self, data_horario):
+        return {
+            'dentista': self.dentista_a.pk,
+            'procedimento_ref': self.procedimento_a.pk,
+            'data_horario': data_horario.isoformat(),
+        }
+
+    def test_staff_cria_bloqueio_e_indisponibilidade(self):
+        self.client.force_authenticate(self.staff)
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        fim = inicio + timedelta(hours=2)
+
+        bloqueio = self.client.post(
+            reverse('bloqueio-agenda-list'),
+            {'clinica': self.clinica_a.pk, 'inicio': inicio.isoformat(), 'fim': fim.isoformat(), 'motivo': 'Feriado local'},
+            format='json',
+        )
+        indisponibilidade = self.client.post(
+            reverse('indisponibilidade-dentista-list'),
+            {'clinica': self.clinica_a.pk, 'dentista': self.dentista_a.pk, 'inicio': inicio.isoformat(), 'fim': fim.isoformat(), 'motivo': 'Ferias'},
+            format='json',
+        )
+
+        self.assertEqual(bloqueio.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(indisponibilidade.status_code, status.HTTP_201_CREATED)
+
+    def test_agendamento_fora_de_bloqueios_e_indisponibilidades_funciona(self):
+        self.client.force_authenticate(self.paciente_a)
+        response = self.client.post(
+            reverse('agendamento-list'),
+            self.payload_agendamento(data_local_futura(self.clinica_a, hora=10)),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_bloqueio_com_intervalo_invalido_retorna_400(self):
+        self.client.force_authenticate(self.staff)
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        response = self.client.post(
+            reverse('bloqueio-agenda-list'),
+            {'clinica': self.clinica_a.pk, 'inicio': inicio.isoformat(), 'fim': inicio.isoformat()},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('fim', response.data)
+
+    def test_indisponibilidade_invalida_retorna_400(self):
+        self.client.force_authenticate(self.staff)
+        inicio = data_local_futura(self.clinica_a, hora=10)
+
+        intervalo_invalido = self.client.post(
+            reverse('indisponibilidade-dentista-list'),
+            {'clinica': self.clinica_a.pk, 'dentista': self.dentista_a.pk, 'inicio': inicio.isoformat(), 'fim': inicio.isoformat()},
+            format='json',
+        )
+        dentista_outra_clinica = self.client.post(
+            reverse('indisponibilidade-dentista-list'),
+            {'clinica': self.clinica_a.pk, 'dentista': self.dentista_b.pk, 'inicio': inicio.isoformat(), 'fim': (inicio + timedelta(hours=1)).isoformat()},
+            format='json',
+        )
+
+        self.assertEqual(intervalo_invalido.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('fim', intervalo_invalido.data)
+        self.assertEqual(dentista_outra_clinica.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('dentista', dentista_outra_clinica.data)
+
+    def test_usuario_comum_nao_cria_bloqueio_ou_indisponibilidade(self):
+        self.client.force_authenticate(self.paciente_a)
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        fim = inicio + timedelta(hours=1)
+
+        bloqueio = self.client.post(
+            reverse('bloqueio-agenda-list'),
+            {'clinica': self.clinica_b.pk, 'inicio': inicio.isoformat(), 'fim': fim.isoformat()},
+            format='json',
+        )
+        indisponibilidade = self.client.post(
+            reverse('indisponibilidade-dentista-list'),
+            {'clinica': self.clinica_b.pk, 'dentista': self.dentista_b.pk, 'inicio': inicio.isoformat(), 'fim': fim.isoformat()},
+            format='json',
+        )
+
+        self.assertEqual(bloqueio.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(indisponibilidade.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_usuario_comum_ve_apenas_bloqueios_e_indisponibilidades_da_propria_clinica(self):
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        bloqueio_a = BloqueioAgendaClinica.objects.create(clinica=self.clinica_a, inicio=inicio, fim=inicio + timedelta(hours=1))
+        bloqueio_b = BloqueioAgendaClinica.objects.create(clinica=self.clinica_b, inicio=inicio, fim=inicio + timedelta(hours=1))
+        indisponibilidade_a = IndisponibilidadeDentista.objects.create(clinica=self.clinica_a, dentista=self.dentista_a, inicio=inicio, fim=inicio + timedelta(hours=1))
+        indisponibilidade_b = IndisponibilidadeDentista.objects.create(clinica=self.clinica_b, dentista=self.dentista_b, inicio=inicio, fim=inicio + timedelta(hours=1))
+
+        self.client.force_authenticate(self.paciente_a)
+        bloqueios = self.client.get(reverse('bloqueio-agenda-list'))
+        bloqueio_b_detail = self.client.get(reverse('bloqueio-agenda-detail', args=[bloqueio_b.pk]))
+        indisponibilidades = self.client.get(reverse('indisponibilidade-dentista-list'))
+        indisponibilidade_b_detail = self.client.get(reverse('indisponibilidade-dentista-detail', args=[indisponibilidade_b.pk]))
+
+        self.assertEqual(bloqueios.status_code, status.HTTP_200_OK)
+        self.assertEqual(bloqueios.data['count'], 1)
+        self.assertEqual(bloqueios.data['results'][0]['id'], bloqueio_a.pk)
+        self.assertEqual(bloqueio_b_detail.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(indisponibilidades.status_code, status.HTTP_200_OK)
+        self.assertEqual(indisponibilidades.data['count'], 1)
+        self.assertEqual(indisponibilidades.data['results'][0]['id'], indisponibilidade_a.pk)
+        self.assertEqual(indisponibilidade_b_detail.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_agendamento_dentro_ou_sobreposto_a_bloqueio_ativo_retorna_409(self):
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        BloqueioAgendaClinica.objects.create(clinica=self.clinica_a, inicio=inicio, fim=inicio + timedelta(hours=2), motivo='Manutencao')
+        self.client.force_authenticate(self.paciente_a)
+
+        dentro = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio + timedelta(minutes=30)), format='json')
+        sobreposto = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio - timedelta(minutes=15)), format='json')
+
+        self.assertEqual(dentro.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(sobreposto.status_code, status.HTTP_409_CONFLICT)
+
+    def test_bloqueio_inativo_nao_impede_agendamento(self):
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        BloqueioAgendaClinica.objects.create(clinica=self.clinica_a, inicio=inicio, fim=inicio + timedelta(hours=1), ativo=False)
+        self.client.force_authenticate(self.paciente_a)
+
+        response = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio), format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_indisponibilidade_ativa_ou_parcial_retorna_409(self):
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        IndisponibilidadeDentista.objects.create(clinica=self.clinica_a, dentista=self.dentista_a, inicio=inicio, fim=inicio + timedelta(hours=2))
+        self.client.force_authenticate(self.paciente_a)
+
+        dentro = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio + timedelta(minutes=30)), format='json')
+        parcial = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio - timedelta(minutes=15)), format='json')
+
+        self.assertEqual(dentro.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(parcial.status_code, status.HTTP_409_CONFLICT)
+
+    def test_indisponibilidade_inativa_nao_impede_agendamento(self):
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        IndisponibilidadeDentista.objects.create(clinica=self.clinica_a, dentista=self.dentista_a, inicio=inicio, fim=inicio + timedelta(hours=1), ativo=False)
+        self.client.force_authenticate(self.paciente_a)
+
+        response = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio), format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_bloqueio_de_outra_clinica_nao_interfere(self):
+        inicio = data_local_futura(self.clinica_a, hora=10)
+        BloqueioAgendaClinica.objects.create(clinica=self.clinica_b, inicio=inicio, fim=inicio + timedelta(hours=1))
+        self.client.force_authenticate(self.paciente_a)
+
+        response = self.client.post(reverse('agendamento-list'), self.payload_agendamento(inicio), format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_cadastro_publico_por_slug_cria_paciente_na_clinica_correta(self):
+        response = self.client.post(
+            '/api/v1/clinicas/sprint-sete-a/pacientes/',
+            self.payload_cadastro_slug(tipo='ADMIN', clinica=self.clinica_b.pk),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        usuario = Usuario.objects.get(username='paciente_slug')
+        self.assertEqual(usuario.tipo, 'PACIENTE')
+        self.assertEqual(usuario.clinica_id, self.clinica_a.pk)
+        self.assertNotIn('password', response.data)
+        self.assertNotIn('tipo', response.data)
+
+    def test_cadastro_publico_por_slug_valida_campos_e_contexto(self):
+        criar_usuario('slug_existente', '98765432100', 'existente.slug@example.com', clinica=self.clinica_a)
+
+        sem_cpf = self.client.post('/api/v1/clinicas/sprint-sete-a/pacientes/', self.payload_cadastro_slug(cpf=''), format='json')
+        cpf_duplicado = self.client.post('/api/v1/clinicas/sprint-sete-a/pacientes/', self.payload_cadastro_slug(username='cpf_dup', email='cpf.dup@example.com'), format='json')
+        email_duplicado = self.client.post('/api/v1/clinicas/sprint-sete-a/pacientes/', self.payload_cadastro_slug(username='email_dup', cpf='11122233344', email='existente.slug@example.com'), format='json')
+        slug_inexistente = self.client.post('/api/v1/clinicas/slug-inexistente/pacientes/', self.payload_cadastro_slug(username='slug_inexistente', cpf='11122233345', email='slug.inexistente@example.com'), format='json')
+        clinica_inativa = self.client.post('/api/v1/clinicas/sprint-sete-inativa/pacientes/', self.payload_cadastro_slug(username='clinica_inativa', cpf='11122233346', email='clinica.inativa@example.com'), format='json')
+
+        self.assertEqual(sem_cpf.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('cpf', sem_cpf.data)
+        self.assertEqual(cpf_duplicado.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('cpf', cpf_duplicado.data)
+        self.assertEqual(email_duplicado.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', email_duplicado.data)
+        self.assertEqual(slug_inexistente.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(clinica_inativa.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('clinica', clinica_inativa.data)
+
+
 class DocumentacaoApiTest(APITestCase):
     def test_schema_openapi_e_gerado_sem_erro(self):
         response = self.client.get('/api/schema/')
@@ -812,7 +1042,7 @@ class AgendaFluxoViewSetTest(APITestCase):
         self.procedimento_inativo = Procedimento.objects.create(clinica=self.clinica_a, nome='Inativo agenda', duracao_minutos=30, ativo=False)
 
     def futuro(self, dias=20, horas=0, minutos=0):
-        return timezone.now() + timedelta(days=dias, hours=horas, minutes=minutos)
+        return data_local_futura(self.clinica_a, dias=dias, hora=10, minuto=0) + timedelta(hours=horas, minutes=minutos)
 
     def payload_agendamento(self, **overrides):
         payload = {
