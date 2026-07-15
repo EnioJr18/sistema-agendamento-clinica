@@ -3,7 +3,8 @@ from datetime import date
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth import password_validation
-from drf_spectacular.utils import OpenApiExample, extend_schema_serializer
+from django.utils import timezone
+from drf_spectacular.utils import OpenApiExample, extend_schema_field, extend_schema_serializer
 from rest_framework import serializers
 
 from .models import (
@@ -297,6 +298,7 @@ class ConviteCadastroPacienteSerializer(serializers.ModelSerializer):
             'pode_ser_consumido',
         ]
 
+    @extend_schema_field(serializers.BooleanField)
     def get_pode_ser_consumido(self, convite):
         return convite.ativo and convite.usado_em is None and convite.expira_em > timezone.now() and convite.clinica.ativa
 

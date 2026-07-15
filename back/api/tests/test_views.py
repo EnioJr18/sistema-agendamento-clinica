@@ -11,6 +11,7 @@ from api.models import (
     Agendamento,
     BloqueioAgendaClinica,
     Clinica,
+    ConviteCadastroPaciente,
     Dentista,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
@@ -996,6 +997,147 @@ class BloqueiosIndisponibilidadesCadastroSlugTest(APITestCase):
         self.assertEqual(slug_inexistente.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(clinica_inativa.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('clinica', clinica_inativa.data)
+
+
+class ConviteCadastroPacienteViewSetTest(APITestCase):
+    def setUp(self):
+        self.clinica_a = Clinica.objects.create(nome='Convites Clinica A')
+        self.clinica_b = Clinica.objects.create(nome='Convites Clinica B')
+        self.clinica_inativa = Clinica.objects.create(nome='Convites Clinica Inativa', ativa=False)
+        self.staff = criar_usuario('convite_staff', '70000000001', 'convite.staff@example.com', tipo='ADMIN', is_staff=True)
+        self.usuario_a = criar_usuario('convite_usuario_a', '70000000002', 'convite.usuario.a@example.com', clinica=self.clinica_a)
+        self.usuario_b = criar_usuario('convite_usuario_b', '70000000003', 'convite.usuario.b@example.com', clinica=self.clinica_b)
+        self.lista_url = reverse('convite-paciente-list')
+
+    def payload_convite(self, **overrides):
+        payload = {
+            'clinica': self.clinica_a.pk,
+            'nome_destino': 'Paciente Convidado',
+            'telefone_destino': '82999990000',
+            'email_destino': 'convidado@example.com',
+            'expira_em': (timezone.now() + timedelta(days=2)).isoformat(),
+        }
+        payload.update(overrides)
+        return payload
+
+    def payload_cadastro(self, **overrides):
+        payload = {
+            'username': 'paciente_por_convite',
+            'password': 'SenhaForte123!',
+            'nome_completo': 'Paciente por Convite',
+            'email': 'paciente.convite@example.com',
+            'cpf': '70000000004',
+            'data_nascimento': '1994-05-10',
+            'telefone': '82988887777',
+        }
+        payload.update(overrides)
+        return payload
+
+    def criar_convite(self, **overrides):
+        dados = self.payload_convite(**overrides)
+        clinica = dados.pop('clinica')
+        if not isinstance(clinica, Clinica):
+            clinica = Clinica.objects.get(pk=clinica)
+        return ConviteCadastroPaciente.objects.create(**dados, clinica=clinica, criado_por=self.staff)
+
+    def url_cadastro(self, convite):
+        return reverse('convite-paciente-cadastrar', kwargs={'token': convite.token})
+
+    def test_staff_cria_convite_ativo_e_recebe_token_e_link(self):
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(self.lista_url, self.payload_convite(), format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        convite = ConviteCadastroPaciente.objects.get(pk=response.data['id'])
+        self.assertEqual(convite.clinica_id, self.clinica_a.id)
+        self.assertEqual(convite.criado_por_id, self.staff.id)
+        self.assertTrue(response.data['token'])
+        self.assertIn(response.data['token'], response.data['endpoint_cadastro'])
+        self.assertIn('link_cadastro', response.data)
+
+        listagem = self.client.get(self.lista_url)
+        self.assertEqual(listagem.status_code, status.HTTP_200_OK)
+        self.assertNotIn('token', listagem.data['results'][0])
+
+    def test_cadastro_por_token_valido_cria_paciente_na_clinica_e_consumo_unico(self):
+        convite = self.criar_convite()
+
+        response = self.client.post(
+            self.url_cadastro(convite),
+            self.payload_cadastro(tipo='ADMIN', clinica=self.clinica_b.pk),
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        usuario = Usuario.objects.get(username='paciente_por_convite')
+        convite.refresh_from_db()
+        self.assertEqual(usuario.tipo, 'PACIENTE')
+        self.assertEqual(usuario.clinica_id, self.clinica_a.id)
+        self.assertIsNotNone(convite.usado_em)
+        self.assertNotIn('password', response.data)
+        self.assertNotIn('tipo', response.data)
+
+        reutilizacao = self.client.post(self.url_cadastro(convite), self.payload_cadastro(), format='json')
+        self.assertEqual(reutilizacao.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('convite', reutilizacao.data)
+
+    def test_campos_invalidos_nao_consumem_convite(self):
+        convite = self.criar_convite()
+        criar_usuario('convite_existente', '70000000005', 'existente.convite@example.com')
+
+        sem_cpf = self.client.post(self.url_cadastro(convite), self.payload_cadastro(cpf=''), format='json')
+        cpf_duplicado = self.client.post(self.url_cadastro(convite), self.payload_cadastro(username='cpf_duplicado', cpf='70000000005'), format='json')
+        email_duplicado = self.client.post(self.url_cadastro(convite), self.payload_cadastro(username='email_duplicado', cpf='70000000006', email='existente.convite@example.com'), format='json')
+        senha_invalida = self.client.post(self.url_cadastro(convite), self.payload_cadastro(username='senha_invalida', cpf='70000000007', email='senha.invalida@example.com', password='12345678'), format='json')
+
+        for response in (sem_cpf, cpf_duplicado, email_duplicado, senha_invalida):
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        convite.refresh_from_db()
+        self.assertIsNone(convite.usado_em)
+
+    def test_convite_inexistente_expirado_inativo_ou_clinica_inativa_retorna_erro_controlado(self):
+        expirado = self.criar_convite(expira_em=timezone.now() - timedelta(minutes=1))
+        inativo = self.criar_convite(email_destino='inativo@example.com', ativo=False)
+        clinica_inativa = self.criar_convite(clinica=self.clinica_inativa, email_destino='clinica.inativa@example.com')
+
+        inexistente = self.client.post('/api/v1/convites-pacientes/token-inexistente/cadastrar/', self.payload_cadastro(), format='json')
+        expirado_response = self.client.post(self.url_cadastro(expirado), self.payload_cadastro(), format='json')
+        inativo_response = self.client.post(self.url_cadastro(inativo), self.payload_cadastro(), format='json')
+        clinica_inativa_response = self.client.post(self.url_cadastro(clinica_inativa), self.payload_cadastro(), format='json')
+
+        self.assertEqual(inexistente.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(expirado_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(inativo_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(clinica_inativa_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_criacao_de_convite_valida_clinica_e_expiracao(self):
+        self.client.force_authenticate(self.staff)
+
+        inexistente = self.client.post(self.lista_url, self.payload_convite(clinica=999999), format='json')
+        inativa = self.client.post(self.lista_url, self.payload_convite(clinica=self.clinica_inativa.pk), format='json')
+        expirada = self.client.post(self.lista_url, self.payload_convite(expira_em=(timezone.now() - timedelta(minutes=1)).isoformat()), format='json')
+
+        self.assertEqual(inexistente.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(inativa.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(expirada.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_usuario_comum_nao_cria_nem_altera_e_nao_acessa_convite_de_outra_clinica(self):
+        convite_a = self.criar_convite()
+        convite_b = self.criar_convite(clinica=self.clinica_b, email_destino='clinica.b@example.com')
+        self.client.force_authenticate(self.usuario_a)
+
+        criacao = self.client.post(self.lista_url, self.payload_convite(clinica=self.clinica_b.pk), format='json')
+        alteracao = self.client.patch(reverse('convite-paciente-detail', kwargs={'token': convite_a.token}), {'ativo': False}, format='json')
+        listagem = self.client.get(self.lista_url)
+        detalhe_outra_clinica = self.client.get(reverse('convite-paciente-detail', kwargs={'token': convite_b.token}))
+
+        self.assertEqual(criacao.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(alteracao.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(listagem.status_code, status.HTTP_200_OK)
+        self.assertEqual(listagem.data['count'], 1)
+        self.assertEqual(listagem.data['results'][0]['id'], convite_a.id)
+        self.assertEqual(detalhe_outra_clinica.status_code, status.HTTP_404_NOT_FOUND)
 
 
 class DocumentacaoApiTest(APITestCase):

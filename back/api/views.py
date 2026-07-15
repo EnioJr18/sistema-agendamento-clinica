@@ -1,5 +1,5 @@
-from django.db import transaction
 from django.conf import settings
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -206,9 +206,6 @@ class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
     @extend_schema(request=CadastroViaConviteSerializer, responses=RegistroUsuarioSerializer)
     @action(detail=True, methods=['post'], url_path='cadastrar')
     def cadastrar(self, request, token=None):
-        serializer = CadastroViaConviteSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-
         with transaction.atomic():
             try:
                 convite = ConviteCadastroPaciente.objects.select_for_update().select_related('clinica').get(token=token)
@@ -224,6 +221,8 @@ class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
             if convite.expira_em <= timezone.now():
                 raise ValidationError({'convite': 'Convite expirado.'})
 
+            serializer = CadastroViaConviteSerializer(data=request.data, context={'request': request})
+            serializer.is_valid(raise_exception=True)
             usuario = serializer.save(clinica=convite.clinica)
             convite.usado_em = timezone.now()
             convite.save(update_fields=['usado_em', 'atualizado_em'])
