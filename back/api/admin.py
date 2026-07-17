@@ -3,14 +3,17 @@ from django.contrib.auth.admin import UserAdmin
 
 from .models import (
     Agendamento,
+    Anamnese,
     BloqueioAgendaClinica,
     Clinica,
     ConviteCadastroPaciente,
     Dentista,
     Endereco,
+    EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
     Procedimento,
+    ProntuarioPaciente,
     Usuario,
 )
 
@@ -89,6 +92,30 @@ class AgendamentoAdmin(admin.ModelAdmin):
     list_display = ('paciente', 'dentista', 'clinica', 'procedimento', 'data_horario', 'status')
     list_filter = ('clinica', 'status', 'dentista')
     search_fields = ('paciente__nome_completo', 'dentista__usuario__nome_completo', 'procedimento')
+
+
+@admin.register(ProntuarioPaciente)
+class ProntuarioPacienteAdmin(admin.ModelAdmin):
+    list_display = ('paciente', 'clinica', 'ativo', 'criado_em', 'atualizado_em', 'criado_por')
+    list_filter = ('clinica', 'ativo', 'criado_em')
+    search_fields = ('paciente__nome_completo', 'paciente__cpf', 'clinica__nome')
+    readonly_fields = ('criado_em', 'atualizado_em', 'criado_por', 'atualizado_por')
+
+
+@admin.register(Anamnese)
+class AnamneseAdmin(admin.ModelAdmin):
+    list_display = ('prontuario', 'preenchida_em', 'preenchida_por', 'atualizada_em', 'atualizada_por')
+    list_filter = ('prontuario__clinica', 'preenchida_em', 'atualizada_em')
+    search_fields = ('prontuario__paciente__nome_completo', 'prontuario__paciente__cpf')
+    readonly_fields = ('preenchida_em', 'preenchida_por', 'atualizada_em', 'atualizada_por')
+
+
+@admin.register(EvolucaoClinica)
+class EvolucaoClinicaAdmin(admin.ModelAdmin):
+    list_display = ('prontuario', 'agendamento', 'dentista', 'criado_em', 'atualizado_em', 'criado_por')
+    list_filter = ('prontuario__clinica', 'dentista', 'criado_em')
+    search_fields = ('prontuario__paciente__nome_completo', 'dentista__usuario__nome_completo', 'descricao')
+    readonly_fields = ('criado_em', 'atualizado_em', 'criado_por')
 
 
 admin.site.register(Endereco)

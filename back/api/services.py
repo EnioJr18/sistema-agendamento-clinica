@@ -204,3 +204,19 @@ def reagendar_agendamento(agendamento, nova_data_horario):
         agendamento.data_hora_fim = fim
         agendamento.save(update_fields=['data_horario', 'duracao_minutos', 'data_hora_fim'])
     return agendamento
+
+
+def validar_criacao_evolucao(*, prontuario, agendamento, dentista):
+    """Protege os vinculos que formam o registro clinico historico."""
+    if prontuario.clinica_id != agendamento.clinica_id:
+        raise ValidationError({'agendamento': 'Agendamento pertence a outra clinica.'})
+    if dentista.clinica_id != prontuario.clinica_id:
+        raise ValidationError({'dentista': 'Dentista pertence a outra clinica.'})
+    if agendamento.dentista_id != dentista.id:
+        raise ValidationError({'dentista': 'Dentista deve ser o vinculado ao atendimento.'})
+    if agendamento.paciente_id != prontuario.paciente_id:
+        raise ValidationError({'agendamento': 'Agendamento pertence a outro paciente.'})
+    if agendamento.status not in {Agendamento.STATUS_EM_ATENDIMENTO, Agendamento.STATUS_CONCLUIDA}:
+        raise ValidationError(
+            {'agendamento': 'Evolucao clinica so pode ser registrada em atendimento ou consulta concluida.'}
+        )

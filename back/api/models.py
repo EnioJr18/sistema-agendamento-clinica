@@ -279,3 +279,75 @@ class Agendamento(models.Model):
 
     def __str__(self):
         return f"{self.paciente} com {self.dentista} em {self.data_horario}"
+
+
+class ProntuarioPaciente(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='prontuarios')
+    paciente = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='prontuarios')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    criado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        related_name='prontuarios_criados',
+        null=True,
+        blank=True,
+    )
+    atualizado_por = models.ForeignKey(
+        Usuario,
+        on_delete=models.SET_NULL,
+        related_name='prontuarios_atualizados',
+        null=True,
+        blank=True,
+    )
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['paciente__nome_completo']
+        constraints = [
+            models.UniqueConstraint(fields=['clinica', 'paciente'], name='prontuario_unico_por_clinica_paciente'),
+        ]
+        indexes = [models.Index(fields=['clinica', 'paciente', 'ativo'])]
+
+    def __str__(self):
+        return f'Prontuario de {self.paciente} - {self.clinica}'
+
+
+class Anamnese(models.Model):
+    prontuario = models.OneToOneField(ProntuarioPaciente, on_delete=models.PROTECT, related_name='anamnese')
+    alergias = models.TextField(blank=True)
+    medicamentos_em_uso = models.TextField(blank=True)
+    condicoes_medicas = models.TextField(blank=True)
+    cirurgias_anteriores = models.TextField(blank=True)
+    historico_familiar = models.TextField(blank=True)
+    gestante = models.BooleanField(null=True, blank=True)
+    fumante = models.BooleanField(null=True, blank=True)
+    consumo_alcool = models.BooleanField(null=True, blank=True)
+    observacoes = models.TextField(blank=True)
+    preenchida_em = models.DateTimeField(auto_now_add=True)
+    preenchida_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, related_name='anamneses_preenchidas', null=True, blank=True)
+    atualizada_em = models.DateTimeField(auto_now=True)
+    atualizada_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, related_name='anamneses_atualizadas', null=True, blank=True)
+
+    def __str__(self):
+        return f'Anamnese de {self.prontuario.paciente}'
+
+
+class EvolucaoClinica(models.Model):
+    prontuario = models.ForeignKey(ProntuarioPaciente, on_delete=models.PROTECT, related_name='evolucoes')
+    agendamento = models.ForeignKey(Agendamento, on_delete=models.PROTECT, related_name='evolucoes_clinicas')
+    dentista = models.ForeignKey(Dentista, on_delete=models.PROTECT, related_name='evolucoes_clinicas')
+    descricao = models.TextField()
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, related_name='evolucoes_criadas', null=True, blank=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+        indexes = [
+            models.Index(fields=['prontuario', 'criado_em']),
+            models.Index(fields=['agendamento', 'dentista']),
+        ]
+
+    def __str__(self):
+        return f'Evolucao de {self.prontuario.paciente} em {self.criado_em:%Y-%m-%d}'

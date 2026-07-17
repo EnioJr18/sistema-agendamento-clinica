@@ -9,14 +9,17 @@ from rest_framework import serializers
 
 from .models import (
     Agendamento,
+    Anamnese,
     BloqueioAgendaClinica,
     Clinica,
     ConviteCadastroPaciente,
     Dentista,
     Endereco,
+    EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
     Procedimento,
+    ProntuarioPaciente,
     Usuario,
 )
 from .services import validar_agendamento_criacao_ou_reagendamento
@@ -495,3 +498,58 @@ class AgendamentoSerializer(serializers.ModelSerializer):
             attrs['data_hora_fim'] = fim
 
         return attrs
+
+
+class ProntuarioPacienteSerializer(serializers.ModelSerializer):
+    nome_paciente = serializers.CharField(source='paciente.get_full_name', read_only=True)
+
+    class Meta:
+        model = ProntuarioPaciente
+        fields = [
+            'id', 'clinica', 'paciente', 'nome_paciente', 'criado_em', 'atualizado_em',
+            'criado_por', 'atualizado_por', 'ativo',
+        ]
+        read_only_fields = ['id', 'criado_em', 'atualizado_em', 'criado_por', 'atualizado_por']
+
+    def validate(self, attrs):
+        clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
+        paciente = attrs.get('paciente') or getattr(self.instance, 'paciente', None)
+        if not paciente:
+            raise serializers.ValidationError({'paciente': 'Informe o paciente.'})
+        if not clinica:
+            raise serializers.ValidationError({'clinica': 'Informe a clinica.'})
+        if paciente.clinica_id != clinica.id:
+            raise serializers.ValidationError({'paciente': 'Paciente pertence a outra clinica.'})
+        return attrs
+
+
+class AnamneseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Anamnese
+        fields = [
+            'id', 'prontuario', 'alergias', 'medicamentos_em_uso', 'condicoes_medicas',
+            'cirurgias_anteriores', 'historico_familiar', 'gestante', 'fumante',
+            'consumo_alcool', 'observacoes', 'preenchida_em', 'preenchida_por',
+            'atualizada_em', 'atualizada_por',
+        ]
+        read_only_fields = [
+            'id', 'prontuario', 'preenchida_em', 'preenchida_por', 'atualizada_em', 'atualizada_por',
+        ]
+
+
+class EvolucaoClinicaSerializer(serializers.ModelSerializer):
+    nome_dentista = serializers.CharField(source='dentista.usuario.get_full_name', read_only=True)
+
+    class Meta:
+        model = EvolucaoClinica
+        fields = [
+            'id', 'prontuario', 'agendamento', 'dentista', 'nome_dentista', 'descricao',
+            'criado_em', 'atualizado_em', 'criado_por',
+        ]
+        read_only_fields = ['id', 'criado_em', 'atualizado_em', 'criado_por']
+        extra_kwargs = {'dentista': {'required': False}}
+
+    def validate_descricao(self, value):
+        if not value.strip():
+            raise serializers.ValidationError('Descricao e obrigatoria.')
+        return value.strip()

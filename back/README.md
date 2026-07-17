@@ -39,6 +39,8 @@ Authorization: Bearer <access_token>
 - `/api/v1/dentistas/`
 - `/api/v1/procedimentos/`
 - `/api/v1/agendamentos/`
+- `/api/v1/prontuarios/`
+- `/api/v1/evolucoes-clinicas/`
 
 Usuarios comuns acessam apenas dados da propria clinica. Staff/admin pode administrar globalmente nesta etapa.
 
@@ -119,6 +121,21 @@ Fluxo atual:
 `FRONTEND_BASE_URL`, quando configurada, permite retornar um link amigavel no formato `/cadastro?convite={token}`. Sem essa variavel, a resposta retorna o endpoint publico da API. O frontend atual nao foi alterado para consumir esse parametro.
 
 Envio real por WhatsApp, e-mail ou qualquer integracao externa ainda nao esta implementado nesta sprint.
+
+## Prontuario odontologico (Sprint 9)
+
+Cada paciente possui no maximo um prontuario ativo por clinica. A criacao de prontuario e administrativa (`staff/admin`) e sempre valida que paciente e clinica pertencem ao mesmo contexto. Prontuarios e evolucoes nao possuem exclusao fisica pela API.
+
+- `GET/POST /api/v1/prontuarios/`
+- `GET/PATCH /api/v1/prontuarios/{id}/anamnese/`
+- `GET /api/v1/prontuarios/{id}/evolucoes/`
+- `GET/POST /api/v1/evolucoes-clinicas/`
+
+Pacientes podem consultar apenas o proprio prontuario, mas nao alteram anamnese e nao acessam ou escrevem evolucoes clinicas nesta primeira versao. Dentistas consultam prontuarios apenas da propria clinica e podem preencher ou atualizar anamnese; `staff/admin` mantem acesso global. Recursos de outra clinica retornam `404` para usuarios comuns.
+
+Uma evolucao vincula de forma imutavel prontuario, agendamento e dentista. Dentistas so podem cria-la para o proprio atendimento; staff/admin tambem precisa informar um dentista que corresponda ao atendimento. O agendamento deve pertencer ao mesmo paciente e clinica do prontuario e estar em `EM_ATENDIMENTO` ou `CONCLUIDA`. Nao sao aceitos `AGENDADA`, `CONFIRMADA`, `CANCELADA` ou `NAO_COMPARECEU`.
+
+Esta fase cobre anamnese textual (alergias, medicamentos, condicoes, antecedentes e observacoes), autoria e datas de criacao/atualizacao. Odontograma, plano de tratamento, prescricoes, atestados, anexos, exames e radiografias permanecem etapas futuras.
 
 ## Paginacao
 

@@ -1,12 +1,12 @@
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.urls import reverse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from .models import (
@@ -15,23 +15,28 @@ from .models import (
     Clinica,
     ConviteCadastroPaciente,
     Dentista,
+    EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
     Procedimento,
+    ProntuarioPaciente,
     Usuario,
 )
 from .serializers import (
     AgendamentoSerializer,
     AlterarSenhaSerializer,
+    AnamneseSerializer,
     BloqueioAgendaClinicaSerializer,
     CadastroViaConviteSerializer,
     ClinicaSerializer,
     ConviteCadastroPacienteSerializer,
     DentistaSerializer,
+    EvolucaoClinicaSerializer,
     HorarioFuncionamentoClinicaSerializer,
     IndisponibilidadeDentistaSerializer,
     PerfilUsuarioSerializer,
     ProcedimentoSerializer,
+    ProntuarioPacienteSerializer,
     ReagendarAgendamentoSerializer,
     RegistroUsuarioSerializer,
     UsuarioAdminSerializer,
@@ -42,6 +47,7 @@ from .services import (
     confirmar_agendamento,
     marcar_falta_agendamento,
     reagendar_agendamento,
+    validar_criacao_evolucao,
 )
 
 
@@ -310,6 +316,153 @@ class ProcedimentoViewSet(viewsets.ModelViewSet):
         if usuario.clinica_id:
             return Procedimento.objects.filter(clinica_id=usuario.clinica_id)
         return Procedimento.objects.none()
+
+
+class ProntuarioPacienteViewSet(viewsets.ModelViewSet):
+    queryset = ProntuarioPaciente.objects.none()
+    serializer_class = ProntuarioPacienteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['clinica', 'paciente', 'ativo']
+    ordering_fields = ['paciente__nome_completo', 'criado_em', 'atualizado_em']
+    ordering = ['paciente__nome_completo']
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ProntuarioPaciente.objects.none()
+        usuario = self.request.user
+        queryset = ProntuarioPaciente.objects.select_related('clinica', 'paciente', 'criado_por', 'atualizado_por')
+        if usuario.is_staff:
+            return queryset
+        if not usuario.clinica_id:
+            return queryset.none()
+        if usuario.tipo == 'PACIENTE':
+            return queryset.filter(clinica_id=usuario.clinica_id, paciente=usuario)
+        if usuario.tipo == 'DENTISTA':
+            return queryset.filter(clinica_id=usuario.clinica_id)
+        return queryset.none()
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode criar prontuarios.')
+        try:
+            with transaction.atomic():
+                return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            raise ValidationError({'paciente': 'Ja existe prontuario para este paciente nesta clinica.'})
+
+    def perform_create(self, serializer):
+        serializer.save(criado_por=self.request.user, atualizado_por=self.request.user)
+
+    def perform_update(self, serializer):
+        if not self.request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode alterar o prontuario.')
+        serializer.save(atualizado_por=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'Prontuarios nao podem ser excluidos fisicamente.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @extend_schema(request=AnamneseSerializer, responses=AnamneseSerializer)
+    @action(detail=True, methods=['get', 'patch'], url_path='anamnese')
+    def anamnese(self, request, pk=None):
+        prontuario = self.get_object()
+        if request.method == 'GET':
+            try:
+                return Response(AnamneseSerializer(prontuario.anamnese).data)
+            except ProntuarioPaciente.anamnese.RelatedObjectDoesNotExist as exc:
+                raise NotFound('Anamnese ainda nao preenchida.') from exc
+
+        if request.user.tipo == 'PACIENTE' and not request.user.is_staff:
+            raise PermissionDenied('Paciente nao pode alterar dados clinicos.')
+        if not request.user.is_staff and request.user.tipo != 'DENTISTA':
+            raise PermissionDenied('Usuario sem permissao para alterar anamnese.')
+        try:
+            anamnese = prontuario.anamnese
+            serializer = AnamneseSerializer(anamnese, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save(atualizada_por=request.user)
+        except ProntuarioPaciente.anamnese.RelatedObjectDoesNotExist:
+            serializer = AnamneseSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            anamnese = serializer.save(
+                prontuario=prontuario,
+                preenchida_por=request.user,
+                atualizada_por=request.user,
+            )
+        return Response(AnamneseSerializer(anamnese).data)
+
+    @extend_schema(responses=EvolucaoClinicaSerializer(many=True))
+    @action(detail=True, methods=['get'], url_path='evolucoes')
+    def evolucoes(self, request, pk=None):
+        prontuario = self.get_object()
+        if request.user.tipo == 'PACIENTE' and not request.user.is_staff:
+            raise PermissionDenied('Paciente nao acessa evolucoes clinicas nesta fase.')
+        queryset = prontuario.evolucoes.select_related('agendamento', 'dentista__usuario', 'criado_por')
+        return Response(EvolucaoClinicaSerializer(queryset, many=True).data)
+
+
+class EvolucaoClinicaViewSet(viewsets.ModelViewSet):
+    queryset = EvolucaoClinica.objects.none()
+    serializer_class = EvolucaoClinicaSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['prontuario', 'agendamento', 'dentista']
+    ordering_fields = ['criado_em', 'atualizado_em']
+    ordering = ['-criado_em']
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return EvolucaoClinica.objects.none()
+        usuario = self.request.user
+        queryset = EvolucaoClinica.objects.select_related('prontuario__clinica', 'agendamento', 'dentista__usuario', 'criado_por')
+        if usuario.is_staff:
+            return queryset
+        if usuario.tipo == 'DENTISTA' and usuario.clinica_id:
+            return queryset.filter(prontuario__clinica_id=usuario.clinica_id)
+        return queryset.none()
+
+    def perform_create(self, serializer):
+        usuario = self.request.user
+        if usuario.is_staff:
+            dentista = serializer.validated_data.get('dentista')
+            if not dentista:
+                raise ValidationError({'dentista': 'Informe o dentista responsavel.'})
+        elif usuario.tipo == 'DENTISTA' and usuario.clinica_id:
+            try:
+                dentista = usuario.perfil_dentista
+            except Dentista.DoesNotExist as exc:
+                raise PermissionDenied('Usuario dentista sem perfil profissional.') from exc
+            enviado = serializer.validated_data.get('dentista')
+            if enviado and enviado.pk != dentista.pk:
+                raise PermissionDenied('Dentista nao pode registrar evolucao para outro profissional.')
+        else:
+            raise PermissionDenied('Paciente nao pode criar evolucoes clinicas.')
+
+        prontuario = serializer.validated_data['prontuario']
+        agendamento = serializer.validated_data['agendamento']
+        validar_criacao_evolucao(prontuario=prontuario, agendamento=agendamento, dentista=dentista)
+        serializer.save(dentista=dentista, criado_por=usuario)
+
+    def update(self, request, *args, **kwargs):
+        evolucao = self.get_object()
+        if not request.user.is_staff and evolucao.criado_por_id != request.user.id:
+            raise PermissionDenied('Apenas o autor ou staff/admin pode editar a evolucao.')
+        imutaveis = {'prontuario', 'agendamento', 'dentista', 'criado_por'} & set(request.data)
+        if imutaveis:
+            raise ValidationError({campo: 'Campo historico imutavel.' for campo in imutaveis})
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'Evolucoes clinicas nao podem ser excluidas fisicamente.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
 
 class AgendamentoViewSet(viewsets.ModelViewSet):
