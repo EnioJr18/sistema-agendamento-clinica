@@ -18,8 +18,12 @@ from .models import (
     EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
+    ItemPlanoTratamento,
+    Odontograma,
+    PlanoTratamento,
     Procedimento,
     ProntuarioPaciente,
+    RegistroOdontograma,
     Usuario,
 )
 from .serializers import (
@@ -34,10 +38,14 @@ from .serializers import (
     EvolucaoClinicaSerializer,
     HorarioFuncionamentoClinicaSerializer,
     IndisponibilidadeDentistaSerializer,
+    ItemPlanoTratamentoSerializer,
+    OdontogramaSerializer,
     PerfilUsuarioSerializer,
+    PlanoTratamentoSerializer,
     ProcedimentoSerializer,
     ProntuarioPacienteSerializer,
     ReagendarAgendamentoSerializer,
+    RegistroOdontogramaSerializer,
     RegistroUsuarioSerializer,
     UsuarioAdminSerializer,
 )
@@ -47,6 +55,8 @@ from .services import (
     confirmar_agendamento,
     marcar_falta_agendamento,
     reagendar_agendamento,
+    transicionar_plano,
+    validar_contexto_odontologico,
     validar_criacao_evolucao,
 )
 
@@ -463,6 +473,153 @@ class EvolucaoClinicaViewSet(viewsets.ModelViewSet):
             {'detail': 'Evolucoes clinicas nao podem ser excluidas fisicamente.'},
             status=status.HTTP_405_METHOD_NOT_ALLOWED,
         )
+
+
+class ClinicoBaseViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_staff and request.user.tipo != 'DENTISTA':
+            raise PermissionDenied('Paciente nao pode criar dados clinicos.')
+        return super().create(request, *args, **kwargs)
+
+    def clinica_queryset(self, queryset, campo='clinica_id'):
+        user = self.request.user
+        if user.is_staff:
+            return queryset
+        if not user.clinica_id:
+            return queryset.none()
+        if user.tipo == 'PACIENTE':
+            return queryset.filter(**{f'{campo}': user.clinica_id, 'prontuario__paciente': user})
+        if user.tipo == 'DENTISTA':
+            return queryset.filter(**{campo: user.clinica_id})
+        return queryset.none()
+
+    def profissional(self):
+        if self.request.user.is_staff:
+            return None
+        if self.request.user.tipo != 'DENTISTA':
+            raise PermissionDenied('Paciente nao pode alterar dados clinicos.')
+        try:
+            return self.request.user.perfil_dentista
+        except Dentista.DoesNotExist as exc:
+            raise PermissionDenied('Usuario dentista sem perfil profissional.') from exc
+
+
+class OdontogramaViewSet(ClinicoBaseViewSet):
+    serializer_class = OdontogramaSerializer
+    queryset = Odontograma.objects.none()
+
+    def get_queryset(self):
+        return self.clinica_queryset(Odontograma.objects.select_related('prontuario__paciente'), 'clinica_id')
+
+    def perform_create(self, serializer):
+        dentista = self.profissional()
+        prontuario = serializer.validated_data['prontuario']
+        clinica = prontuario.clinica
+        validar_contexto_odontologico(prontuario=prontuario, clinica=clinica, dentista=dentista)
+        try:
+            serializer.save(clinica=clinica, criado_por=self.request.user, atualizado_por=self.request.user)
+        except IntegrityError as exc:
+            raise ValidationError({'prontuario': 'Ja existe odontograma ativo para este prontuario.'}) from exc
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Odontogramas nao podem ser excluidos fisicamente.'}, status=405)
+
+
+class RegistroOdontogramaViewSet(ClinicoBaseViewSet):
+    serializer_class = RegistroOdontogramaSerializer
+    queryset = RegistroOdontograma.objects.none()
+
+    def get_queryset(self):
+        queryset = RegistroOdontograma.objects.select_related('odontograma__prontuario__paciente', 'dentista')
+        if self.request.user.tipo == 'PACIENTE' and not self.request.user.is_staff:
+            return queryset.filter(odontograma__prontuario__paciente=self.request.user)
+        return self.clinica_queryset(queryset, 'odontograma__clinica_id')
+
+    def perform_create(self, serializer):
+        dentista = self.profissional()
+        if dentista is None:
+            dentista = serializer.validated_data.get('dentista')
+        if not dentista:
+            raise ValidationError({'dentista': 'Informe o dentista responsavel.'})
+        odontograma = serializer.validated_data['odontograma']
+        validar_contexto_odontologico(prontuario=odontograma.prontuario, clinica=odontograma.clinica, dentista=dentista)
+        serializer.save(dentista=dentista, criado_por=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        raise ValidationError({'detail': 'Registros odontologicos sao historicos e imutaveis.'})
+
+    partial_update = update
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Registros odontologicos nao podem ser excluidos fisicamente.'}, status=405)
+
+
+class PlanoTratamentoViewSet(ClinicoBaseViewSet):
+    serializer_class = PlanoTratamentoSerializer
+    queryset = PlanoTratamento.objects.none()
+
+    def get_queryset(self):
+        return self.clinica_queryset(PlanoTratamento.objects.select_related('prontuario__paciente'), 'clinica_id')
+
+    def perform_create(self, serializer):
+        dentista = self.profissional()
+        prontuario = serializer.validated_data['prontuario']
+        validar_contexto_odontologico(prontuario=prontuario, clinica=prontuario.clinica, dentista=dentista)
+        serializer.save(clinica=prontuario.clinica, criado_por=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        self.profissional()
+        if {'clinica', 'prontuario', 'status', 'criado_por'} & set(request.data):
+            raise ValidationError({'detail': 'Campos de contexto e status sao imutaveis nesta rota.'})
+        return super().update(request, *args, **kwargs)
+
+    partial_update = update
+
+    def _transicao(self, request, status_destino, pk):
+        self.profissional()
+        return Response(self.get_serializer(transicionar_plano(self.get_object(), status_destino)).data)
+
+    @action(detail=True, methods=['post'])
+    def propor(self, request, pk=None): return self._transicao(request, 'PROPOSTO', pk)
+    @action(detail=True, methods=['post'])
+    def aprovar(self, request, pk=None): return self._transicao(request, 'APROVADO', pk)
+    @action(detail=True, methods=['post'])
+    def iniciar(self, request, pk=None): return self._transicao(request, 'EM_ANDAMENTO', pk)
+    @action(detail=True, methods=['post'])
+    def concluir(self, request, pk=None): return self._transicao(request, 'CONCLUIDO', pk)
+    @action(detail=True, methods=['post'])
+    def cancelar(self, request, pk=None): return self._transicao(request, 'CANCELADO', pk)
+
+
+class ItemPlanoTratamentoViewSet(ClinicoBaseViewSet):
+    serializer_class = ItemPlanoTratamentoSerializer
+    queryset = ItemPlanoTratamento.objects.none()
+
+    def get_queryset(self):
+        queryset = ItemPlanoTratamento.objects.select_related('plano__prontuario__paciente', 'procedimento_ref')
+        if self.request.user.tipo == 'PACIENTE' and not self.request.user.is_staff:
+            return queryset.filter(plano__prontuario__paciente=self.request.user)
+        return self.clinica_queryset(queryset, 'plano__clinica_id')
+
+    def perform_create(self, serializer):
+        self.profissional()
+        plano = serializer.validated_data['plano']
+        if plano.status in {'CONCLUIDO', 'CANCELADO'}:
+            raise ValidationError({'plano': 'Plano concluido ou cancelado nao aceita novos itens.'})
+        procedimento = serializer.validated_data.get('procedimento_ref')
+        if procedimento and procedimento.clinica_id != plano.clinica_id:
+            raise ValidationError({'procedimento_ref': 'Procedimento pertence a outra clinica.'})
+        serializer.save()
+
+    def update(self, request, *args, **kwargs):
+        self.profissional()
+        if 'plano' in request.data:
+            raise ValidationError({'plano': 'Item nao pode ser movido para outro plano.'})
+        return super().update(request, *args, **kwargs)
+
+    partial_update = update
 
 
 class AgendamentoViewSet(viewsets.ModelViewSet):

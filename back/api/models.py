@@ -351,3 +351,73 @@ class EvolucaoClinica(models.Model):
 
     def __str__(self):
         return f'Evolucao de {self.prontuario.paciente} em {self.criado_em:%Y-%m-%d}'
+
+
+class Odontograma(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='odontogramas')
+    prontuario = models.ForeignKey(ProntuarioPaciente, on_delete=models.PROTECT, related_name='odontogramas')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='odontogramas_criados')
+    atualizado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='odontogramas_atualizados')
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['prontuario__paciente__nome_completo']
+        constraints = [models.UniqueConstraint(fields=['prontuario', 'ativo'], name='odontograma_ativo_unico_por_prontuario')]
+
+
+class RegistroOdontograma(models.Model):
+    FACE_CHOICES = [(valor, valor.replace('_', ' ').title()) for valor in ('VESTIBULAR', 'LINGUAL', 'PALATINA', 'MESIAL', 'DISTAL', 'OCLUSAL', 'INCISAL', 'GERAL')]
+    CONDICAO_CHOICES = [(valor, valor.replace('_', ' ').title()) for valor in ('SAUDAVEL', 'CARIE', 'RESTAURADO', 'AUSENTE', 'FRATURADO', 'IMPLANTE', 'COROA', 'TRATAMENTO_CANAL', 'EXTRACAO_INDICADA', 'PROTESE', 'OUTRO')]
+    odontograma = models.ForeignKey(Odontograma, on_delete=models.PROTECT, related_name='registros')
+    numero_dente = models.PositiveSmallIntegerField()
+    face = models.CharField(max_length=20, choices=FACE_CHOICES)
+    condicao = models.CharField(max_length=25, choices=CONDICAO_CHOICES)
+    observacao = models.TextField(blank=True)
+    dentista = models.ForeignKey(Dentista, on_delete=models.PROTECT, related_name='registros_odontograma')
+    criado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='registros_odontograma_criados')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+
+
+class PlanoTratamento(models.Model):
+    STATUS_CHOICES = [(v, v.replace('_', ' ').title()) for v in ('RASCUNHO', 'PROPOSTO', 'APROVADO', 'EM_ANDAMENTO', 'CONCLUIDO', 'CANCELADO')]
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='planos_tratamento')
+    prontuario = models.ForeignKey(ProntuarioPaciente, on_delete=models.PROTECT, related_name='planos_tratamento')
+    titulo = models.CharField(max_length=150)
+    descricao = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='RASCUNHO')
+    criado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='planos_tratamento_criados')
+    aprovado_em = models.DateTimeField(null=True, blank=True)
+    concluido_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+
+
+class ItemPlanoTratamento(models.Model):
+    STATUS_CHOICES = [(v, v.replace('_', ' ').title()) for v in ('PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDO', 'CANCELADO')]
+    PRIORIDADE_CHOICES = [(v, v.title()) for v in ('BAIXA', 'MEDIA', 'ALTA', 'URGENTE')]
+    plano = models.ForeignKey(PlanoTratamento, on_delete=models.PROTECT, related_name='itens')
+    procedimento_ref = models.ForeignKey(Procedimento, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_plano')
+    descricao = models.TextField()
+    numero_dente = models.PositiveSmallIntegerField(null=True, blank=True)
+    face = models.CharField(max_length=20, choices=RegistroOdontograma.FACE_CHOICES, null=True, blank=True)
+    prioridade = models.CharField(max_length=10, choices=PRIORIDADE_CHOICES, default='MEDIA')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDENTE')
+    quantidade = models.PositiveSmallIntegerField(default=1)
+    valor_estimado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    ordem = models.PositiveSmallIntegerField(default=0)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['ordem', 'id']

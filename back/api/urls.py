@@ -10,8 +10,12 @@ from .views import (
     EvolucaoClinicaViewSet,
     HorarioFuncionamentoClinicaViewSet,
     IndisponibilidadeDentistaViewSet,
+    ItemPlanoTratamentoViewSet,
+    OdontogramaViewSet,
+    PlanoTratamentoViewSet,
     ProcedimentoViewSet,
     ProntuarioPacienteViewSet,
+    RegistroOdontogramaViewSet,
     UsuarioViewSet,
 )
 
@@ -28,6 +32,10 @@ router.register(r'procedimentos', ProcedimentoViewSet, basename='procedimento')
 router.register(r'agendamentos', AgendamentoViewSet, basename='agendamento')
 router.register(r'prontuarios', ProntuarioPacienteViewSet, basename='prontuario')
 router.register(r'evolucoes-clinicas', EvolucaoClinicaViewSet, basename='evolucao-clinica')
+router.register(r'odontogramas', OdontogramaViewSet, basename='odontograma')
+router.register(r'registros-odontograma', RegistroOdontogramaViewSet, basename='registro-odontograma')
+router.register(r'planos-tratamento', PlanoTratamentoViewSet, basename='plano-tratamento')
+router.register(r'itens-plano-tratamento', ItemPlanoTratamentoViewSet, basename='item-plano-tratamento')
 
 urlpatterns = [
     path('', include(router.urls)),

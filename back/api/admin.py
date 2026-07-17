@@ -12,8 +12,12 @@ from .models import (
     EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
+    ItemPlanoTratamento,
+    Odontograma,
+    PlanoTratamento,
     Procedimento,
     ProntuarioPaciente,
+    RegistroOdontograma,
     Usuario,
 )
 
@@ -116,6 +120,38 @@ class EvolucaoClinicaAdmin(admin.ModelAdmin):
     list_filter = ('prontuario__clinica', 'dentista', 'criado_em')
     search_fields = ('prontuario__paciente__nome_completo', 'dentista__usuario__nome_completo', 'descricao')
     readonly_fields = ('criado_em', 'atualizado_em', 'criado_por')
+
+
+@admin.register(Odontograma)
+class OdontogramaAdmin(admin.ModelAdmin):
+    list_display = ('prontuario', 'clinica', 'ativo', 'criado_em', 'criado_por')
+    list_filter = ('clinica', 'ativo', 'criado_em')
+    search_fields = ('prontuario__paciente__nome_completo', 'prontuario__paciente__cpf')
+    readonly_fields = ('clinica', 'prontuario', 'criado_em', 'atualizado_em', 'criado_por', 'atualizado_por')
+
+
+@admin.register(RegistroOdontograma)
+class RegistroOdontogramaAdmin(admin.ModelAdmin):
+    list_display = ('odontograma', 'numero_dente', 'face', 'condicao', 'dentista', 'criado_em', 'ativo')
+    list_filter = ('odontograma__clinica', 'condicao', 'face', 'dentista', 'ativo', 'criado_em')
+    search_fields = ('odontograma__prontuario__paciente__nome_completo', 'numero_dente', 'observacao')
+    readonly_fields = ('odontograma', 'numero_dente', 'face', 'condicao', 'dentista', 'criado_por', 'criado_em', 'atualizado_em')
+
+
+@admin.register(PlanoTratamento)
+class PlanoTratamentoAdmin(admin.ModelAdmin):
+    list_display = ('titulo', 'prontuario', 'clinica', 'status', 'criado_por', 'criado_em', 'ativo')
+    list_filter = ('clinica', 'status', 'ativo', 'criado_em')
+    search_fields = ('titulo', 'prontuario__paciente__nome_completo', 'descricao')
+    readonly_fields = ('clinica', 'prontuario', 'criado_por', 'aprovado_em', 'concluido_em', 'criado_em', 'atualizado_em')
+
+
+@admin.register(ItemPlanoTratamento)
+class ItemPlanoTratamentoAdmin(admin.ModelAdmin):
+    list_display = ('plano', 'descricao', 'numero_dente', 'prioridade', 'status', 'quantidade', 'ordem')
+    list_filter = ('plano__clinica', 'prioridade', 'status', 'criado_em')
+    search_fields = ('plano__titulo', 'plano__prontuario__paciente__nome_completo', 'descricao')
+    readonly_fields = ('plano', 'criado_em', 'atualizado_em')
 
 
 admin.site.register(Endereco)

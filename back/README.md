@@ -41,6 +41,10 @@ Authorization: Bearer <access_token>
 - `/api/v1/agendamentos/`
 - `/api/v1/prontuarios/`
 - `/api/v1/evolucoes-clinicas/`
+- `/api/v1/odontogramas/`
+- `/api/v1/registros-odontograma/`
+- `/api/v1/planos-tratamento/`
+- `/api/v1/itens-plano-tratamento/`
 
 Usuarios comuns acessam apenas dados da propria clinica. Staff/admin pode administrar globalmente nesta etapa.
 
@@ -136,6 +140,14 @@ Pacientes podem consultar apenas o proprio prontuario, mas nao alteram anamnese 
 Uma evolucao vincula de forma imutavel prontuario, agendamento e dentista. Dentistas so podem cria-la para o proprio atendimento; staff/admin tambem precisa informar um dentista que corresponda ao atendimento. O agendamento deve pertencer ao mesmo paciente e clinica do prontuario e estar em `EM_ATENDIMENTO` ou `CONCLUIDA`. Nao sao aceitos `AGENDADA`, `CONFIRMADA`, `CANCELADA` ou `NAO_COMPARECEU`.
 
 Esta fase cobre anamnese textual (alergias, medicamentos, condicoes, antecedentes e observacoes), autoria e datas de criacao/atualizacao. Odontograma, plano de tratamento, prescricoes, atestados, anexos, exames e radiografias permanecem etapas futuras.
+
+## Odontograma e plano de tratamento (Sprint 10)
+
+O odontograma e clinicamente vinculado ao prontuario, com uma instancia ativa por prontuario. A clinica e a autoria sao inferidas pelo backend; pacientes apenas consultam dados do proprio prontuario. Registros odontologicos sao historicos: uma nova condicao cria outro registro, sem sobrescrever nem excluir o anterior.
+
+A numeracao aceita dentes permanentes FDI: `11-18`, `21-28`, `31-38` e `41-48`. Faces: `VESTIBULAR`, `LINGUAL`, `PALATINA`, `MESIAL`, `DISTAL`, `OCLUSAL`, `INCISAL`, `GERAL`. Condicoes: `SAUDAVEL`, `CARIE`, `RESTAURADO`, `AUSENTE`, `FRATURADO`, `IMPLANTE`, `COROA`, `TRATAMENTO_CANAL`, `EXTRACAO_INDICADA`, `PROTESE` e `OUTRO`.
+
+Planos de tratamento iniciam em `RASCUNHO`; seu status so muda por acoes explicitas: `propor`, `aprovar`, `iniciar`, `concluir` e `cancelar`. As transicoes permitidas sao `RASCUNHO -> PROPOSTO -> APROVADO -> EM_ANDAMENTO -> CONCLUIDO`, com cancelamento a partir de `PROPOSTO`, `APROVADO` ou `EM_ANDAMENTO`. Planos `CONCLUIDO` e `CANCELADO` nao aceitam novos itens. Um item pode referenciar um procedimento da mesma clinica, mas esta sprint nao implementa financeiro, anexos ou interface visual do odontograma.
 
 ## Paginacao
 

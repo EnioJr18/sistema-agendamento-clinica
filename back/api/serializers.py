@@ -18,11 +18,15 @@ from .models import (
     EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
+    ItemPlanoTratamento,
+    Odontograma,
+    PlanoTratamento,
     Procedimento,
     ProntuarioPaciente,
+    RegistroOdontograma,
     Usuario,
 )
-from .services import validar_agendamento_criacao_ou_reagendamento
+from .services import validar_agendamento_criacao_ou_reagendamento, validar_dente
 
 
 @extend_schema_serializer(
@@ -553,3 +557,50 @@ class EvolucaoClinicaSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError('Descricao e obrigatoria.')
         return value.strip()
+
+
+class OdontogramaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Odontograma
+        fields = ['id', 'clinica', 'prontuario', 'criado_em', 'atualizado_em', 'criado_por', 'atualizado_por', 'ativo']
+        read_only_fields = ['id', 'clinica', 'criado_em', 'atualizado_em', 'criado_por', 'atualizado_por']
+
+
+class RegistroOdontogramaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RegistroOdontograma
+        fields = ['id', 'odontograma', 'numero_dente', 'face', 'condicao', 'observacao', 'dentista', 'criado_por', 'criado_em', 'atualizado_em', 'ativo']
+        read_only_fields = ['id', 'dentista', 'criado_por', 'criado_em', 'atualizado_em']
+
+    def validate_numero_dente(self, value):
+        validar_dente(value)
+        return value
+
+
+class PlanoTratamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlanoTratamento
+        fields = ['id', 'clinica', 'prontuario', 'titulo', 'descricao', 'status', 'criado_por', 'aprovado_em', 'concluido_em', 'criado_em', 'atualizado_em', 'ativo']
+        read_only_fields = ['id', 'clinica', 'status', 'criado_por', 'aprovado_em', 'concluido_em', 'criado_em', 'atualizado_em']
+
+
+class ItemPlanoTratamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemPlanoTratamento
+        fields = ['id', 'plano', 'procedimento_ref', 'descricao', 'numero_dente', 'face', 'prioridade', 'status', 'quantidade', 'valor_estimado', 'ordem', 'criado_em', 'atualizado_em']
+        read_only_fields = ['id', 'criado_em', 'atualizado_em']
+
+    def validate_numero_dente(self, value):
+        if value is not None:
+            validar_dente(value)
+        return value
+
+    def validate_quantidade(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Quantidade deve ser maior que zero.')
+        return value
+
+    def validate_valor_estimado(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError('Valor estimado nao pode ser negativo.')
+        return value

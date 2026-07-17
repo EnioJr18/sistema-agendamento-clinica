@@ -220,3 +220,35 @@ def validar_criacao_evolucao(*, prontuario, agendamento, dentista):
         raise ValidationError(
             {'agendamento': 'Evolucao clinica so pode ser registrada em atendimento ou consulta concluida.'}
         )
+
+
+NUMEROS_DENTES_FDI = set(range(11, 19)) | set(range(21, 29)) | set(range(31, 39)) | set(range(41, 49))
+TRANSICOES_PLANO = {
+    'RASCUNHO': {'PROPOSTO'}, 'PROPOSTO': {'APROVADO', 'CANCELADO'},
+    'APROVADO': {'EM_ANDAMENTO', 'CANCELADO'}, 'EM_ANDAMENTO': {'CONCLUIDO', 'CANCELADO'},
+}
+
+
+def validar_dente(numero_dente):
+    if numero_dente not in NUMEROS_DENTES_FDI:
+        raise ValidationError({'numero_dente': 'Numero de dente deve usar a numeracao FDI permanente valida.'})
+
+
+def validar_contexto_odontologico(*, prontuario, clinica, dentista=None):
+    if prontuario.clinica_id != clinica.id:
+        raise ValidationError({'prontuario': 'Prontuario pertence a outra clinica.'})
+    if dentista and dentista.clinica_id != clinica.id:
+        raise ValidationError({'dentista': 'Dentista pertence a outra clinica.'})
+
+
+def transicionar_plano(plano, novo_status):
+    if novo_status not in TRANSICOES_PLANO.get(plano.status, set()):
+        raise ValidationError({'status': f'Transicao de {plano.status} para {novo_status} nao permitida.'})
+    plano.status = novo_status
+    agora = timezone.now()
+    if novo_status == 'APROVADO':
+        plano.aprovado_em = agora
+    if novo_status == 'CONCLUIDO':
+        plano.concluido_em = agora
+    plano.save()
+    return plano
