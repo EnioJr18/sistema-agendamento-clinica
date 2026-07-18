@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from datetime import date, timedelta
 
 from django.contrib.auth.models import AbstractUser
@@ -6,6 +7,12 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
+
+
+def caminho_arquivo_clinico(instance, filename):
+    """Keep user supplied names out of storage paths and make names unguessable."""
+    extensao = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'bin'
+    return f'arquivos-clinicos/clinica-{instance.clinica_id}/paciente-{instance.paciente_id}/{uuid.uuid4().hex}.{extensao}'
 
 
 class Clinica(models.Model):
@@ -505,3 +512,91 @@ class Pagamento(models.Model):
     class Meta:
         ordering = ['-pago_em', '-id']
         constraints = [models.UniqueConstraint(fields=['clinica', 'referencia_externa'], condition=models.Q(referencia_externa__isnull=False), name='pagamento_referencia_unica_por_clinica')]
+
+
+class ArquivoClinico(models.Model):
+    CATEGORIA_CHOICES = [(v, v.title()) for v in ('RADIOGRAFIA', 'EXAME', 'FOTOGRAFIA', 'DOCUMENTO', 'RECEITA', 'ATESTADO', 'CONSENTIMENTO', 'OUTRO')]
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='arquivos_clinicos')
+    paciente = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='arquivos_clinicos')
+    prontuario = models.ForeignKey(ProntuarioPaciente, on_delete=models.PROTECT, null=True, blank=True, related_name='arquivos_clinicos')
+    agendamento = models.ForeignKey(Agendamento, on_delete=models.PROTECT, null=True, blank=True, related_name='arquivos_clinicos')
+    categoria = models.CharField(max_length=20, choices=CATEGORIA_CHOICES)
+    arquivo = models.FileField(upload_to=caminho_arquivo_clinico)
+    nome_original = models.CharField(max_length=255, editable=False)
+    nome_exibicao = models.CharField(max_length=255, blank=True)
+    mime_type = models.CharField(max_length=100, editable=False)
+    tamanho_bytes = models.PositiveBigIntegerField(editable=False)
+    descricao = models.TextField(blank=True)
+    hash_sha256 = models.CharField(max_length=64, editable=False)
+    liberado_paciente = models.BooleanField(default=True)
+    enviado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='arquivos_clinicos_enviados')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+        indexes = [models.Index(fields=['clinica', 'paciente', 'ativo'])]
+
+
+class AcessoArquivoClinico(models.Model):
+    ACAO_CHOICES = [(v, v.title()) for v in ('VISUALIZACAO', 'DOWNLOAD', 'DESATIVACAO', 'EXPORTACAO')]
+    arquivo = models.ForeignKey(ArquivoClinico, on_delete=models.PROTECT, related_name='acessos')
+    usuario = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='acessos_arquivos_clinicos')
+    acao = models.CharField(max_length=20, choices=ACAO_CHOICES)
+    data_hora = models.DateTimeField(auto_now_add=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True)
+    sucesso = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-data_hora']
+
+
+class TermoConsentimento(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.CASCADE, null=True, blank=True, related_name='termos_consentimento')
+    titulo = models.CharField(max_length=255)
+    codigo = models.SlugField(max_length=100)
+    versao = models.PositiveIntegerField()
+    conteudo = models.TextField()
+    finalidade = models.TextField(blank=True)
+    obrigatorio = models.BooleanField(default=False)
+    ativo = models.BooleanField(default=True)
+    publicado_em = models.DateTimeField(null=True, blank=True)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='termos_consentimento_criados')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['codigo', '-versao']
+        constraints = [models.UniqueConstraint(fields=['codigo', 'versao'], name='termo_codigo_versao_unico')]
+
+
+class ConsentimentoPaciente(models.Model):
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='consentimentos_pacientes')
+    paciente = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='consentimentos')
+    termo = models.ForeignKey(TermoConsentimento, on_delete=models.PROTECT, related_name='aceites')
+    aceito = models.BooleanField(default=True)
+    aceito_em = models.DateTimeField(default=timezone.now)
+    revogado_em = models.DateTimeField(null=True, blank=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True)
+    registrado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='consentimentos_registrados')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-aceito_em']
+
+
+class SolicitacaoAnonimizacao(models.Model):
+    STATUS_CHOICES = [(v, v.title()) for v in ('SOLICITADA', 'EM_ANALISE', 'PROCESSADA', 'RECUSADA')]
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='solicitacoes_anonimizacao')
+    paciente = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='solicitacoes_anonimizacao')
+    motivo = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='SOLICITADA')
+    solicitado_em = models.DateTimeField(auto_now_add=True)
+    processado_em = models.DateTimeField(null=True, blank=True)
+    processado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, related_name='anonimizacoes_processadas')
+
+    class Meta:
+        ordering = ['-solicitado_em']

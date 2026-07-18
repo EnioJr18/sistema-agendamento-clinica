@@ -133,6 +133,15 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Storage remains Django's standard abstraction: development/tests use the local
+# filesystem and production can switch to django-storages/S3 without changing
+# the clinical-file domain model.
+ARQUIVO_CLINICO_MAX_TAMANHO_BYTES = config('ARQUIVO_CLINICO_MAX_TAMANHO_BYTES', default=10 * 1024 * 1024, cast=int)
+ARQUIVO_CLINICO_MIME_TYPES = ('application/pdf', 'image/jpeg', 'image/png', 'image/webp')
+ARQUIVO_CLINICO_EXTENSOES = ('.pdf', '.jpg', '.jpeg', '.png', '.webp')
 
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = config(

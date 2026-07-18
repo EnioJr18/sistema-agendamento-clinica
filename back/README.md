@@ -253,6 +253,17 @@ docker compose run --rm -e USE_SQLITE_FOR_TESTS=False backend python manage.py t
 
 Retorna apenas estado basico da aplicacao e do banco, sem expor segredos.
 
+## Arquivos clinicos, consentimento e privacidade
+
+- `POST/GET /api/v1/arquivos-clinicos/` recebe PDF, JPEG, PNG ou WEBP; o limite padrao e 10 MB e pode ser ajustado por `ARQUIVO_CLINICO_MAX_TAMANHO_BYTES`.
+- O upload valida extensao, MIME, assinatura basica, tamanho e nome. O arquivo e armazenado pelo `FileField` do Django em caminho interno aleatorio por clinica/paciente; nao ha URL publica.
+- `GET /api/v1/arquivos-clinicos/{id}/download/` exige JWT, aplica o isolamento por clinica/paciente e cria auditoria. O storage atual e local; o modelo permanece desacoplado para futura configuracao com `django-storages`/S3, sem credenciais AWS nesta sprint.
+- Termos versionados ficam em `/api/v1/termos-consentimento/`; aceite e revogacao preservam historico em `/api/v1/consentimentos/`.
+- `POST /api/v1/usuarios/{id}/exportar-dados/` produz uma exportacao JSON protegida. Senhas, tokens, segredos e caminhos de storage nao sao incluidos. Dados financeiros sao incluidos apenas para staff/admin.
+- `POST /api/v1/usuarios/{id}/solicitar-anonimizacao/` registra a solicitacao; nao apaga prontuario, financeiro ou historico clinico automaticamente.
+
+Esta base tecnica nao declara conformidade juridica integral com a LGPD. Regras de retencao devem ser validadas juridicamente antes da producao. Antimalware externo, assinatura digital certificada, OCR e URLs presigned/S3 nao fazem parte desta sprint.
+
 ## CI
 
 O workflow `Backend CI` roda em push e pull request para mudancas do backend. Ele instala dependencias, sobe PostgreSQL, roda lint, verifica migrations, executa migrations, testes e coverage. Nao ha deploy configurado nesta sprint.

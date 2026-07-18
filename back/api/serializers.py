@@ -1,8 +1,11 @@
+import hashlib
 import re
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.conf import settings
 from django.contrib.auth import password_validation
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiExample, extend_schema_field, extend_schema_serializer
@@ -11,8 +14,10 @@ from rest_framework import serializers
 from .models import (
     Agendamento,
     Anamnese,
+    ArquivoClinico,
     BloqueioAgendaClinica,
     Clinica,
+    ConsentimentoPaciente,
     ConviteCadastroPaciente,
     Dentista,
     Endereco,
@@ -29,6 +34,8 @@ from .models import (
     Procedimento,
     ProntuarioPaciente,
     RegistroOdontograma,
+    SolicitacaoAnonimizacao,
+    TermoConsentimento,
     Usuario,
 )
 from .services import validar_agendamento_criacao_ou_reagendamento, validar_dente
@@ -130,7 +137,9 @@ class HorarioFuncionamentoClinicaSerializer(serializers.ModelSerializer):
             if self.instance:
                 sobrepostos = sobrepostos.exclude(pk=self.instance.pk)
             if sobrepostos.exists():
-                raise serializers.ValidationError({'horario_inicio': 'Intervalo se sobrepoe a outro horario ativo da clinica.'})
+                raise serializers.ValidationError(
+                    {'horario_inicio': 'Intervalo se sobrepoe a outro horario ativo da clinica.'}
+                )
 
         return attrs
 
@@ -244,6 +253,7 @@ class UsuarioBaseSerializer(serializers.ModelSerializer):
 
 class RegistroUsuarioSerializer(UsuarioBaseSerializer):
     """Serializer do cadastro publico: cria exclusivamente pacientes."""
+
     password = serializers.CharField(write_only=True, trim_whitespace=False)
 
     class Meta(UsuarioBaseSerializer.Meta):
@@ -260,7 +270,7 @@ class RegistroUsuarioSerializer(UsuarioBaseSerializer):
     def validate(self, attrs):
         nome_completo = attrs.get('nome_completo')
         if not nome_completo:
-            nome_compat = f"{attrs.get('first_name', '')} {attrs.get('last_name', '')}".strip()
+            nome_compat = f'{attrs.get("first_name", "")} {attrs.get("last_name", "")}'.strip()
             attrs['nome_completo'] = nome_compat or attrs.get('username', '')
         return attrs
 
@@ -312,7 +322,9 @@ class ConviteCadastroPacienteSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.BooleanField)
     def get_pode_ser_consumido(self, convite):
-        return convite.ativo and convite.usado_em is None and convite.expira_em > timezone.now() and convite.clinica.ativa
+        return (
+            convite.ativo and convite.usado_em is None and convite.expira_em > timezone.now() and convite.clinica.ativa
+        )
 
     def validate(self, attrs):
         clinica = attrs.get('clinica') or getattr(self.instance, 'clinica', None)
@@ -370,7 +382,15 @@ class ReagendarAgendamentoSerializer(serializers.Serializer):
     examples=[
         OpenApiExample(
             'Dentista',
-            value={'id': 1, 'clinica': 1, 'usuario': 3, 'nome': 'Dra. Ana Silva', 'especialidade': 'Ortodontia', 'cro': '12345-AL', 'ativo': True},
+            value={
+                'id': 1,
+                'clinica': 1,
+                'usuario': 3,
+                'nome': 'Dra. Ana Silva',
+                'especialidade': 'Ortodontia',
+                'cro': '12345-AL',
+                'ativo': True,
+            },
         )
     ]
 )
@@ -381,7 +401,18 @@ class DentistaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Dentista
-        fields = ['id', 'clinica', 'usuario', 'nome', 'especialidade', 'cro', 'email', 'telefone', 'disponibilidade', 'ativo']
+        fields = [
+            'id',
+            'clinica',
+            'usuario',
+            'nome',
+            'especialidade',
+            'cro',
+            'email',
+            'telefone',
+            'disponibilidade',
+            'ativo',
+        ]
 
     def validate_cro(self, value):
         cro = value.strip().upper()
@@ -408,7 +439,14 @@ class DentistaSerializer(serializers.ModelSerializer):
     examples=[
         OpenApiExample(
             'Procedimento',
-            value={'id': 1, 'clinica': 1, 'nome': 'Limpeza', 'descricao': 'Profilaxia odontologica', 'duracao_minutos': 30, 'ativo': True},
+            value={
+                'id': 1,
+                'clinica': 1,
+                'nome': 'Limpeza',
+                'descricao': 'Profilaxia odontologica',
+                'duracao_minutos': 30,
+                'ativo': True,
+            },
         )
     ]
 )
@@ -423,7 +461,15 @@ class ProcedimentoSerializer(serializers.ModelSerializer):
     examples=[
         OpenApiExample(
             'Agendamento',
-            value={'id': 1, 'clinica': 1, 'dentista': 2, 'nome_dentista': 'Dra. Ana Silva', 'procedimento': 'Limpeza', 'data_horario': '2030-01-13T10:00:00Z', 'status': 'AGENDADA'},
+            value={
+                'id': 1,
+                'clinica': 1,
+                'dentista': 2,
+                'nome_dentista': 'Dra. Ana Silva',
+                'procedimento': 'Limpeza',
+                'data_horario': '2030-01-13T10:00:00Z',
+                'status': 'AGENDADA',
+            },
         )
     ]
 )
@@ -439,9 +485,31 @@ class AgendamentoSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Agendamento
-        fields = ['id', 'clinica', 'dentista', 'nome_dentista', 'especialidade_dentista', 'paciente', 'nome_paciente', 'email_paciente', 'telefone_paciente', 'idade_paciente', 'procedimento', 'procedimento_ref', 'data_horario', 'data_hora_fim', 'duracao_minutos', 'status', 'criado_em']
+        fields = [
+            'id',
+            'clinica',
+            'dentista',
+            'nome_dentista',
+            'especialidade_dentista',
+            'paciente',
+            'nome_paciente',
+            'email_paciente',
+            'telefone_paciente',
+            'idade_paciente',
+            'procedimento',
+            'procedimento_ref',
+            'data_horario',
+            'data_hora_fim',
+            'duracao_minutos',
+            'status',
+            'criado_em',
+        ]
         read_only_fields = ['criado_em', 'data_hora_fim']
-        extra_kwargs = {'paciente': {'required': False}, 'clinica': {'required': False}, 'dentista': {'required': False}}
+        extra_kwargs = {
+            'paciente': {'required': False},
+            'clinica': {'required': False},
+            'dentista': {'required': False},
+        }
         validators = []
 
     def validate(self, attrs):
@@ -515,8 +583,15 @@ class ProntuarioPacienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProntuarioPaciente
         fields = [
-            'id', 'clinica', 'paciente', 'nome_paciente', 'criado_em', 'atualizado_em',
-            'criado_por', 'atualizado_por', 'ativo',
+            'id',
+            'clinica',
+            'paciente',
+            'nome_paciente',
+            'criado_em',
+            'atualizado_em',
+            'criado_por',
+            'atualizado_por',
+            'ativo',
         ]
         read_only_fields = ['id', 'criado_em', 'atualizado_em', 'criado_por', 'atualizado_por']
 
@@ -536,13 +611,29 @@ class AnamneseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Anamnese
         fields = [
-            'id', 'prontuario', 'alergias', 'medicamentos_em_uso', 'condicoes_medicas',
-            'cirurgias_anteriores', 'historico_familiar', 'gestante', 'fumante',
-            'consumo_alcool', 'observacoes', 'preenchida_em', 'preenchida_por',
-            'atualizada_em', 'atualizada_por',
+            'id',
+            'prontuario',
+            'alergias',
+            'medicamentos_em_uso',
+            'condicoes_medicas',
+            'cirurgias_anteriores',
+            'historico_familiar',
+            'gestante',
+            'fumante',
+            'consumo_alcool',
+            'observacoes',
+            'preenchida_em',
+            'preenchida_por',
+            'atualizada_em',
+            'atualizada_por',
         ]
         read_only_fields = [
-            'id', 'prontuario', 'preenchida_em', 'preenchida_por', 'atualizada_em', 'atualizada_por',
+            'id',
+            'prontuario',
+            'preenchida_em',
+            'preenchida_por',
+            'atualizada_em',
+            'atualizada_por',
         ]
 
 
@@ -552,8 +643,15 @@ class EvolucaoClinicaSerializer(serializers.ModelSerializer):
     class Meta:
         model = EvolucaoClinica
         fields = [
-            'id', 'prontuario', 'agendamento', 'dentista', 'nome_dentista', 'descricao',
-            'criado_em', 'atualizado_em', 'criado_por',
+            'id',
+            'prontuario',
+            'agendamento',
+            'dentista',
+            'nome_dentista',
+            'descricao',
+            'criado_em',
+            'atualizado_em',
+            'criado_por',
         ]
         read_only_fields = ['id', 'criado_em', 'atualizado_em', 'criado_por']
         extra_kwargs = {'dentista': {'required': False}}
@@ -574,7 +672,19 @@ class OdontogramaSerializer(serializers.ModelSerializer):
 class RegistroOdontogramaSerializer(serializers.ModelSerializer):
     class Meta:
         model = RegistroOdontograma
-        fields = ['id', 'odontograma', 'numero_dente', 'face', 'condicao', 'observacao', 'dentista', 'criado_por', 'criado_em', 'atualizado_em', 'ativo']
+        fields = [
+            'id',
+            'odontograma',
+            'numero_dente',
+            'face',
+            'condicao',
+            'observacao',
+            'dentista',
+            'criado_por',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
+        ]
         read_only_fields = ['id', 'dentista', 'criado_por', 'criado_em', 'atualizado_em']
 
     def validate_numero_dente(self, value):
@@ -585,14 +695,50 @@ class RegistroOdontogramaSerializer(serializers.ModelSerializer):
 class PlanoTratamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = PlanoTratamento
-        fields = ['id', 'clinica', 'prontuario', 'titulo', 'descricao', 'status', 'criado_por', 'aprovado_em', 'concluido_em', 'criado_em', 'atualizado_em', 'ativo']
-        read_only_fields = ['id', 'clinica', 'status', 'criado_por', 'aprovado_em', 'concluido_em', 'criado_em', 'atualizado_em']
+        fields = [
+            'id',
+            'clinica',
+            'prontuario',
+            'titulo',
+            'descricao',
+            'status',
+            'criado_por',
+            'aprovado_em',
+            'concluido_em',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
+        ]
+        read_only_fields = [
+            'id',
+            'clinica',
+            'status',
+            'criado_por',
+            'aprovado_em',
+            'concluido_em',
+            'criado_em',
+            'atualizado_em',
+        ]
 
 
 class ItemPlanoTratamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemPlanoTratamento
-        fields = ['id', 'plano', 'procedimento_ref', 'descricao', 'numero_dente', 'face', 'prioridade', 'status', 'quantidade', 'valor_estimado', 'ordem', 'criado_em', 'atualizado_em']
+        fields = [
+            'id',
+            'plano',
+            'procedimento_ref',
+            'descricao',
+            'numero_dente',
+            'face',
+            'prioridade',
+            'status',
+            'quantidade',
+            'valor_estimado',
+            'ordem',
+            'criado_em',
+            'atualizado_em',
+        ]
         read_only_fields = ['id', 'criado_em', 'atualizado_em']
 
     def validate_numero_dente(self, value):
@@ -615,13 +761,42 @@ class OrcamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Orcamento
         fields = [
-            'id', 'clinica', 'paciente', 'plano_tratamento', 'titulo', 'descricao', 'status', 'validade_em',
-            'subtotal', 'desconto_tipo', 'desconto_valor', 'total', 'valor_pago', 'saldo', 'criado_por',
-            'aprovado_em', 'rejeitado_em', 'cancelado_em', 'criado_em', 'atualizado_em', 'ativo',
+            'id',
+            'clinica',
+            'paciente',
+            'plano_tratamento',
+            'titulo',
+            'descricao',
+            'status',
+            'validade_em',
+            'subtotal',
+            'desconto_tipo',
+            'desconto_valor',
+            'total',
+            'valor_pago',
+            'saldo',
+            'criado_por',
+            'aprovado_em',
+            'rejeitado_em',
+            'cancelado_em',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
         ]
         read_only_fields = [
-            'id', 'clinica', 'status', 'subtotal', 'total', 'valor_pago', 'saldo', 'criado_por', 'aprovado_em',
-            'rejeitado_em', 'cancelado_em', 'criado_em', 'atualizado_em',
+            'id',
+            'clinica',
+            'status',
+            'subtotal',
+            'total',
+            'valor_pago',
+            'saldo',
+            'criado_por',
+            'aprovado_em',
+            'rejeitado_em',
+            'cancelado_em',
+            'criado_em',
+            'atualizado_em',
         ]
 
     def validate_desconto_valor(self, value):
@@ -657,8 +832,18 @@ class ItemOrcamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = ItemOrcamento
         fields = [
-            'id', 'orcamento', 'item_plano_tratamento', 'procedimento_ref', 'descricao', 'quantidade',
-            'valor_unitario', 'subtotal', 'numero_dente', 'criado_em', 'atualizado_em', 'ativo',
+            'id',
+            'orcamento',
+            'item_plano_tratamento',
+            'procedimento_ref',
+            'descricao',
+            'quantidade',
+            'valor_unitario',
+            'subtotal',
+            'numero_dente',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
         ]
         read_only_fields = ['id', 'subtotal', 'criado_em', 'atualizado_em']
 
@@ -687,14 +872,28 @@ class ItemOrcamentoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'procedimento_ref': 'Procedimento pertence a outra clinica.'})
         if item_plano:
             if not orcamento.plano_tratamento_id or item_plano.plano_id != orcamento.plano_tratamento_id:
-                raise serializers.ValidationError({'item_plano_tratamento': 'Item deve pertencer ao plano associado ao orcamento.'})
+                raise serializers.ValidationError(
+                    {'item_plano_tratamento': 'Item deve pertencer ao plano associado ao orcamento.'}
+                )
         return attrs
 
 
 class ParcelaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Parcela
-        fields = ['id', 'clinica', 'orcamento', 'numero', 'valor', 'vencimento', 'status', 'paga_em', 'criado_em', 'atualizado_em', 'ativo']
+        fields = [
+            'id',
+            'clinica',
+            'orcamento',
+            'numero',
+            'valor',
+            'vencimento',
+            'status',
+            'paga_em',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
+        ]
         read_only_fields = fields
 
 
@@ -702,8 +901,19 @@ class PagamentoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pagamento
         fields = [
-            'id', 'clinica', 'paciente', 'orcamento', 'parcela', 'valor', 'forma_pagamento', 'pago_em',
-            'observacao', 'referencia_externa', 'registrado_por', 'criado_em', 'ativo',
+            'id',
+            'clinica',
+            'paciente',
+            'orcamento',
+            'parcela',
+            'valor',
+            'forma_pagamento',
+            'pago_em',
+            'observacao',
+            'referencia_externa',
+            'registrado_por',
+            'criado_em',
+            'ativo',
         ]
         read_only_fields = ['id', 'clinica', 'paciente', 'registrado_por', 'criado_em', 'ativo']
 
@@ -729,3 +939,144 @@ class ParcelarOrcamentoSerializer(serializers.Serializer):
     quantidade_parcelas = serializers.IntegerField(min_value=1)
     primeiro_vencimento = serializers.DateField()
     intervalo_dias = serializers.IntegerField(min_value=1, required=False, default=30)
+
+
+class ArquivoClinicoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ArquivoClinico
+        fields = [
+            'id',
+            'clinica',
+            'paciente',
+            'prontuario',
+            'agendamento',
+            'categoria',
+            'arquivo',
+            'nome_original',
+            'nome_exibicao',
+            'mime_type',
+            'tamanho_bytes',
+            'descricao',
+            'hash_sha256',
+            'liberado_paciente',
+            'enviado_por',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
+        ]
+        read_only_fields = [
+            'id',
+            'clinica',
+            'nome_original',
+            'mime_type',
+            'tamanho_bytes',
+            'hash_sha256',
+            'enviado_por',
+            'criado_em',
+            'atualizado_em',
+            'ativo',
+        ]
+
+    def validate_arquivo(self, arquivo):
+        nome = Path(arquivo.name).name
+        if not nome or nome != arquivo.name or '..' in nome or nome.count('.') > 1:
+            raise serializers.ValidationError('Nome de arquivo invalido ou suspeito.')
+        extensao = Path(nome).suffix.lower()
+        if extensao not in settings.ARQUIVO_CLINICO_EXTENSOES:
+            raise serializers.ValidationError('Extensao de arquivo nao permitida.')
+        if not arquivo.size or arquivo.size > settings.ARQUIVO_CLINICO_MAX_TAMANHO_BYTES:
+            raise serializers.ValidationError('Arquivo vazio ou acima do limite configurado.')
+        if arquivo.content_type not in settings.ARQUIVO_CLINICO_MIME_TYPES:
+            raise serializers.ValidationError('Tipo MIME nao permitido.')
+        inicio = arquivo.read(16)
+        arquivo.seek(0)
+        assinaturas = {
+            '.pdf': b'%PDF-',
+            '.jpg': b'\xff\xd8\xff',
+            '.jpeg': b'\xff\xd8\xff',
+            '.png': b'\x89PNG\r\n\x1a\n',
+            '.webp': b'RIFF',
+        }
+        if not inicio.startswith(assinaturas[extensao]):
+            raise serializers.ValidationError('Conteudo nao corresponde ao tipo declarado.')
+        return arquivo
+
+    def validate(self, attrs):
+        paciente = attrs.get('paciente', getattr(self.instance, 'paciente', None))
+        prontuario = attrs.get('prontuario', getattr(self.instance, 'prontuario', None))
+        agendamento = attrs.get('agendamento', getattr(self.instance, 'agendamento', None))
+        if prontuario and (prontuario.paciente_id != paciente.id or prontuario.clinica_id != paciente.clinica_id):
+            raise serializers.ValidationError({'prontuario': 'Prontuario incompativel com o paciente.'})
+        if agendamento and (agendamento.paciente_id != paciente.id or agendamento.clinica_id != paciente.clinica_id):
+            raise serializers.ValidationError({'agendamento': 'Agendamento incompativel com o paciente.'})
+        return attrs
+
+    def create(self, validated_data):
+        arquivo = validated_data['arquivo']
+        conteudo = arquivo.read()
+        arquivo.seek(0)
+        validated_data.update(
+            nome_original=Path(arquivo.name).name,
+            mime_type=arquivo.content_type,
+            tamanho_bytes=arquivo.size,
+            hash_sha256=hashlib.sha256(conteudo).hexdigest(),
+        )
+        return super().create(validated_data)
+
+
+class TermoConsentimentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TermoConsentimento
+        fields = [
+            'id',
+            'clinica',
+            'titulo',
+            'codigo',
+            'versao',
+            'conteudo',
+            'finalidade',
+            'obrigatorio',
+            'ativo',
+            'publicado_em',
+            'criado_por',
+            'criado_em',
+            'atualizado_em',
+        ]
+        read_only_fields = ['id', 'criado_por', 'criado_em', 'atualizado_em']
+
+
+class ConsentimentoPacienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConsentimentoPaciente
+        fields = [
+            'id',
+            'clinica',
+            'paciente',
+            'termo',
+            'aceito',
+            'aceito_em',
+            'revogado_em',
+            'ip',
+            'user_agent',
+            'registrado_por',
+            'criado_em',
+        ]
+        read_only_fields = [
+            'id',
+            'clinica',
+            'paciente',
+            'aceito',
+            'aceito_em',
+            'revogado_em',
+            'ip',
+            'user_agent',
+            'registrado_por',
+            'criado_em',
+        ]
+
+
+class SolicitacaoAnonimizacaoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SolicitacaoAnonimizacao
+        fields = ['id', 'clinica', 'paciente', 'motivo', 'status', 'solicitado_em', 'processado_em', 'processado_por']
+        read_only_fields = ['id', 'clinica', 'paciente', 'status', 'solicitado_em', 'processado_em', 'processado_por']

@@ -2,10 +2,13 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
 from .models import (
+    AcessoArquivoClinico,
     Agendamento,
     Anamnese,
+    ArquivoClinico,
     BloqueioAgendaClinica,
     Clinica,
+    ConsentimentoPaciente,
     ConviteCadastroPaciente,
     Dentista,
     Endereco,
@@ -22,6 +25,8 @@ from .models import (
     Procedimento,
     ProntuarioPaciente,
     RegistroOdontograma,
+    SolicitacaoAnonimizacao,
+    TermoConsentimento,
     Usuario,
 )
 
@@ -39,7 +44,18 @@ class UsuarioAdmin(UserAdmin):
     add_fieldsets = UserAdmin.add_fieldsets + (
         (
             'Informacoes cadastrais',
-            {'fields': ('nome_completo', 'nome_preferido', 'email', 'cpf', 'telefone', 'data_nascimento', 'tipo', 'clinica')},
+            {
+                'fields': (
+                    'nome_completo',
+                    'nome_preferido',
+                    'email',
+                    'cpf',
+                    'telefone',
+                    'data_nascimento',
+                    'tipo',
+                    'clinica',
+                )
+            },
         ),
     )
     list_display = ('username', 'nome_completo', 'email', 'cpf', 'tipo', 'clinica', 'is_staff', 'is_active')
@@ -48,7 +64,14 @@ class UsuarioAdmin(UserAdmin):
 
 @admin.register(Clinica)
 class ClinicaAdmin(admin.ModelAdmin):
-    list_display = ('nome', 'slug', 'timezone', 'antecedencia_minima_cancelamento_horas', 'duracao_padrao_consulta_minutos', 'ativa')
+    list_display = (
+        'nome',
+        'slug',
+        'timezone',
+        'antecedencia_minima_cancelamento_horas',
+        'duracao_padrao_consulta_minutos',
+        'ativa',
+    )
     list_filter = ('ativa', 'timezone')
     search_fields = ('nome', 'slug', 'cnpj', 'email')
 
@@ -82,7 +105,16 @@ class IndisponibilidadeDentistaAdmin(admin.ModelAdmin):
 
 @admin.register(ConviteCadastroPaciente)
 class ConviteCadastroPacienteAdmin(admin.ModelAdmin):
-    list_display = ('clinica', 'nome_destino', 'telefone_destino', 'email_destino', 'expira_em', 'usado_em', 'ativo', 'criado_por')
+    list_display = (
+        'clinica',
+        'nome_destino',
+        'telefone_destino',
+        'email_destino',
+        'expira_em',
+        'usado_em',
+        'ativo',
+        'criado_por',
+    )
     list_filter = ('clinica', 'ativo', 'expira_em', 'usado_em', 'criado_por')
     search_fields = ('nome_destino', 'telefone_destino', 'email_destino', 'clinica__nome', 'criado_por__username')
     readonly_fields = ('token', 'usado_em', 'criado_em', 'atualizado_em')
@@ -139,7 +171,16 @@ class RegistroOdontogramaAdmin(admin.ModelAdmin):
     list_display = ('odontograma', 'numero_dente', 'face', 'condicao', 'dentista', 'criado_em', 'ativo')
     list_filter = ('odontograma__clinica', 'condicao', 'face', 'dentista', 'ativo', 'criado_em')
     search_fields = ('odontograma__prontuario__paciente__nome_completo', 'numero_dente', 'observacao')
-    readonly_fields = ('odontograma', 'numero_dente', 'face', 'condicao', 'dentista', 'criado_por', 'criado_em', 'atualizado_em')
+    readonly_fields = (
+        'odontograma',
+        'numero_dente',
+        'face',
+        'condicao',
+        'dentista',
+        'criado_por',
+        'criado_em',
+        'atualizado_em',
+    )
 
 
 @admin.register(PlanoTratamento)
@@ -147,7 +188,15 @@ class PlanoTratamentoAdmin(admin.ModelAdmin):
     list_display = ('titulo', 'prontuario', 'clinica', 'status', 'criado_por', 'criado_em', 'ativo')
     list_filter = ('clinica', 'status', 'ativo', 'criado_em')
     search_fields = ('titulo', 'prontuario__paciente__nome_completo', 'descricao')
-    readonly_fields = ('clinica', 'prontuario', 'criado_por', 'aprovado_em', 'concluido_em', 'criado_em', 'atualizado_em')
+    readonly_fields = (
+        'clinica',
+        'prontuario',
+        'criado_por',
+        'aprovado_em',
+        'concluido_em',
+        'criado_em',
+        'atualizado_em',
+    )
 
 
 @admin.register(ItemPlanoTratamento)
@@ -163,7 +212,19 @@ class OrcamentoAdmin(admin.ModelAdmin):
     list_display = ('titulo', 'clinica', 'paciente', 'status', 'total', 'valor_pago', 'saldo', 'validade_em', 'ativo')
     list_filter = ('clinica', 'status', 'ativo', 'validade_em', 'criado_em')
     search_fields = ('titulo', 'paciente__nome_completo', 'paciente__cpf', 'plano_tratamento__titulo')
-    readonly_fields = ('clinica', 'subtotal', 'total', 'valor_pago', 'saldo', 'criado_por', 'aprovado_em', 'rejeitado_em', 'cancelado_em', 'criado_em', 'atualizado_em')
+    readonly_fields = (
+        'clinica',
+        'subtotal',
+        'total',
+        'valor_pago',
+        'saldo',
+        'criado_por',
+        'aprovado_em',
+        'rejeitado_em',
+        'cancelado_em',
+        'criado_em',
+        'atualizado_em',
+    )
 
 
 @admin.register(ItemOrcamento)
@@ -184,10 +245,101 @@ class ParcelaAdmin(admin.ModelAdmin):
 
 @admin.register(Pagamento)
 class PagamentoAdmin(admin.ModelAdmin):
-    list_display = ('orcamento', 'paciente', 'clinica', 'parcela', 'valor', 'forma_pagamento', 'pago_em', 'registrado_por', 'ativo')
+    list_display = (
+        'orcamento',
+        'paciente',
+        'clinica',
+        'parcela',
+        'valor',
+        'forma_pagamento',
+        'pago_em',
+        'registrado_por',
+        'ativo',
+    )
     list_filter = ('clinica', 'forma_pagamento', 'ativo', 'pago_em', 'criado_em')
     search_fields = ('orcamento__titulo', 'paciente__nome_completo', 'referencia_externa', 'observacao')
-    readonly_fields = ('clinica', 'paciente', 'orcamento', 'parcela', 'valor', 'forma_pagamento', 'pago_em', 'referencia_externa', 'registrado_por', 'criado_em')
+    readonly_fields = (
+        'clinica',
+        'paciente',
+        'orcamento',
+        'parcela',
+        'valor',
+        'forma_pagamento',
+        'pago_em',
+        'referencia_externa',
+        'registrado_por',
+        'criado_em',
+    )
+
+
+@admin.register(ArquivoClinico)
+class ArquivoClinicoAdmin(admin.ModelAdmin):
+    list_display = (
+        'nome_exibicao',
+        'paciente',
+        'clinica',
+        'categoria',
+        'mime_type',
+        'tamanho_bytes',
+        'ativo',
+        'criado_em',
+    )
+    list_filter = ('clinica', 'categoria', 'ativo', 'criado_em')
+    search_fields = ('nome_original', 'nome_exibicao', 'paciente__nome_completo')
+    readonly_fields = (
+        'clinica',
+        'paciente',
+        'prontuario',
+        'agendamento',
+        'arquivo',
+        'nome_original',
+        'mime_type',
+        'tamanho_bytes',
+        'hash_sha256',
+        'enviado_por',
+        'criado_em',
+        'atualizado_em',
+    )
+
+
+@admin.register(AcessoArquivoClinico)
+class AcessoArquivoClinicoAdmin(admin.ModelAdmin):
+    list_display = ('arquivo', 'usuario', 'acao', 'sucesso', 'data_hora')
+    list_filter = ('acao', 'sucesso', 'data_hora', 'arquivo__clinica')
+    readonly_fields = ('arquivo', 'usuario', 'acao', 'data_hora', 'ip', 'user_agent', 'sucesso')
+
+
+@admin.register(TermoConsentimento)
+class TermoConsentimentoAdmin(admin.ModelAdmin):
+    list_display = ('titulo', 'codigo', 'versao', 'clinica', 'obrigatorio', 'ativo', 'publicado_em')
+    list_filter = ('clinica', 'obrigatorio', 'ativo', 'publicado_em')
+    search_fields = ('titulo', 'codigo', 'finalidade')
+    readonly_fields = ('criado_por', 'criado_em', 'atualizado_em')
+
+
+@admin.register(ConsentimentoPaciente)
+class ConsentimentoPacienteAdmin(admin.ModelAdmin):
+    list_display = ('paciente', 'termo', 'clinica', 'aceito_em', 'revogado_em', 'registrado_por')
+    list_filter = ('clinica', 'termo', 'aceito_em', 'revogado_em')
+    readonly_fields = (
+        'clinica',
+        'paciente',
+        'termo',
+        'aceito',
+        'aceito_em',
+        'revogado_em',
+        'ip',
+        'user_agent',
+        'registrado_por',
+        'criado_em',
+    )
+
+
+@admin.register(SolicitacaoAnonimizacao)
+class SolicitacaoAnonimizacaoAdmin(admin.ModelAdmin):
+    list_display = ('paciente', 'clinica', 'status', 'solicitado_em', 'processado_em', 'processado_por')
+    list_filter = ('clinica', 'status', 'solicitado_em', 'processado_em')
+    readonly_fields = ('clinica', 'paciente', 'solicitado_em')
 
 
 admin.site.register(Endereco)

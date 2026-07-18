@@ -1,5 +1,6 @@
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
+from django.http import FileResponse
 from django.urls import reverse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
@@ -10,9 +11,13 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 
 from .models import (
+    AcessoArquivoClinico,
     Agendamento,
+    Anamnese,
+    ArquivoClinico,
     BloqueioAgendaClinica,
     Clinica,
+    ConsentimentoPaciente,
     ConviteCadastroPaciente,
     Dentista,
     EvolucaoClinica,
@@ -28,15 +33,19 @@ from .models import (
     Procedimento,
     ProntuarioPaciente,
     RegistroOdontograma,
+    SolicitacaoAnonimizacao,
+    TermoConsentimento,
     Usuario,
 )
 from .serializers import (
     AgendamentoSerializer,
     AlterarSenhaSerializer,
     AnamneseSerializer,
+    ArquivoClinicoSerializer,
     BloqueioAgendaClinicaSerializer,
     CadastroViaConviteSerializer,
     ClinicaSerializer,
+    ConsentimentoPacienteSerializer,
     ConviteCadastroPacienteSerializer,
     DentistaSerializer,
     EvolucaoClinicaSerializer,
@@ -56,6 +65,8 @@ from .serializers import (
     ReagendarAgendamentoSerializer,
     RegistroOdontogramaSerializer,
     RegistroUsuarioSerializer,
+    SolicitacaoAnonimizacaoSerializer,
+    TermoConsentimentoSerializer,
     UsuarioAdminSerializer,
 )
 from .services import (
@@ -112,7 +123,9 @@ class ClinicaViewSet(viewsets.ModelViewSet):
         serializer = RegistroUsuarioSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
         usuario = serializer.save(clinica=clinica)
-        return Response(RegistroUsuarioSerializer(usuario, context={'request': request}).data, status=status.HTTP_201_CREATED)
+        return Response(
+            RegistroUsuarioSerializer(usuario, context={'request': request}).data, status=status.HTTP_201_CREATED
+        )
 
 
 class HorarioFuncionamentoClinicaViewSet(viewsets.ModelViewSet):
@@ -211,7 +224,9 @@ class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
         if usuario.is_staff:
             return ConviteCadastroPaciente.objects.select_related('clinica', 'criado_por')
         if usuario.clinica_id:
-            return ConviteCadastroPaciente.objects.select_related('clinica', 'criado_por').filter(clinica_id=usuario.clinica_id)
+            return ConviteCadastroPaciente.objects.select_related('clinica', 'criado_por').filter(
+                clinica_id=usuario.clinica_id
+            )
         return ConviteCadastroPaciente.objects.none()
 
     def create(self, request, *args, **kwargs):
@@ -226,9 +241,7 @@ class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
         dados['token'] = convite.token
         dados['endpoint_cadastro'] = endpoint_cadastro
         dados['link_cadastro'] = (
-            f'{frontend_base_url}/cadastro?convite={convite.token}'
-            if frontend_base_url
-            else endpoint_cadastro
+            f'{frontend_base_url}/cadastro?convite={convite.token}' if frontend_base_url else endpoint_cadastro
         )
         headers = self.get_success_headers(dados)
         return Response(dados, status=status.HTTP_201_CREATED, headers=headers)
@@ -257,7 +270,9 @@ class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
             convite.usado_em = timezone.now()
             convite.save(update_fields=['usado_em', 'atualizado_em'])
 
-        return Response(RegistroUsuarioSerializer(usuario, context={'request': request}).data, status=status.HTTP_201_CREATED)
+        return Response(
+            RegistroUsuarioSerializer(usuario, context={'request': request}).data, status=status.HTTP_201_CREATED
+        )
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
@@ -292,6 +307,85 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         request.user.set_password(serializer.validated_data['nova_senha'])
         request.user.save(update_fields=['password'])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _pode_operar_dados_paciente(self, paciente):
+        usuario = self.request.user
+        if usuario.is_staff:
+            return True
+        if usuario.tipo == 'PACIENTE' and usuario == paciente:
+            return True
+        return usuario.tipo == 'DENTISTA' and usuario.clinica_id == paciente.clinica_id
+
+    @action(detail=True, methods=['post'], url_path='exportar-dados')
+    def exportar_dados(self, request, pk=None):
+        paciente = self.get_object()
+        if not self._pode_operar_dados_paciente(paciente):
+            raise NotFound()
+        dados = PerfilUsuarioSerializer(paciente, context={'request': request}).data
+        prontuarios = ProntuarioPaciente.objects.filter(paciente=paciente)
+        exportacao = {
+            'paciente': dados,
+            'prontuarios': list(prontuarios.values('id', 'ativo', 'criado_em', 'atualizado_em')),
+            'anamnese': list(
+                Anamnese.objects.filter(prontuario__paciente=paciente).values(
+                    'prontuario_id', 'alergias', 'medicamentos_em_uso', 'condicoes_medicas', 'observacoes'
+                )
+            ),
+            'evolucoes': list(
+                EvolucaoClinica.objects.filter(prontuario__paciente=paciente).values(
+                    'id', 'prontuario_id', 'agendamento_id', 'descricao', 'criado_em'
+                )
+            ),
+            'odontograma': list(
+                Odontograma.objects.filter(prontuario__paciente=paciente).values('id', 'prontuario_id', 'ativo')
+            ),
+            'planos': list(
+                PlanoTratamento.objects.filter(prontuario__paciente=paciente).values(
+                    'id', 'titulo', 'descricao', 'status', 'criado_em'
+                )
+            ),
+            'consentimentos': list(
+                ConsentimentoPaciente.objects.filter(paciente=paciente).values(
+                    'id', 'termo_id', 'aceito_em', 'revogado_em'
+                )
+            ),
+            'arquivos': list(
+                ArquivoClinico.objects.filter(paciente=paciente).values(
+                    'id',
+                    'categoria',
+                    'nome_exibicao',
+                    'nome_original',
+                    'mime_type',
+                    'tamanho_bytes',
+                    'hash_sha256',
+                    'criado_em',
+                    'ativo',
+                )
+            ),
+        }
+        if request.user.is_staff:
+            exportacao['financeiro'] = list(
+                Orcamento.objects.filter(paciente=paciente).values('id', 'titulo', 'status', 'total', 'saldo')
+            )
+        for arquivo in ArquivoClinico.objects.filter(paciente=paciente):
+            AcessoArquivoClinico.objects.create(
+                arquivo=arquivo,
+                usuario=request.user,
+                acao='EXPORTACAO',
+                ip=request.META.get('REMOTE_ADDR'),
+                user_agent=request.META.get('HTTP_USER_AGENT', '')[:512],
+            )
+        return Response(exportacao)
+
+    @action(detail=True, methods=['post'], url_path='solicitar-anonimizacao')
+    def solicitar_anonimizacao(self, request, pk=None):
+        paciente = self.get_object()
+        if request.user != paciente and not request.user.is_staff:
+            raise NotFound()
+        solicitacao = SolicitacaoAnonimizacao.objects.create(
+            clinica=paciente.clinica, paciente=paciente, motivo=request.data.get('motivo', '')
+        )
+        return Response(SolicitacaoAnonimizacaoSerializer(solicitacao).data, status=status.HTTP_201_CREATED)
 
 
 class DentistaViewSet(viewsets.ModelViewSet):
@@ -441,7 +535,9 @@ class EvolucaoClinicaViewSet(viewsets.ModelViewSet):
         if getattr(self, 'swagger_fake_view', False):
             return EvolucaoClinica.objects.none()
         usuario = self.request.user
-        queryset = EvolucaoClinica.objects.select_related('prontuario__clinica', 'agendamento', 'dentista__usuario', 'criado_por')
+        queryset = EvolucaoClinica.objects.select_related(
+            'prontuario__clinica', 'agendamento', 'dentista__usuario', 'criado_por'
+        )
         if usuario.is_staff:
             return queryset
         if usuario.tipo == 'DENTISTA' and usuario.clinica_id:
@@ -596,15 +692,24 @@ class PlanoTratamentoViewSet(ClinicoBaseViewSet):
         return Response(self.get_serializer(transicionar_plano(self.get_object(), status_destino)).data)
 
     @action(detail=True, methods=['post'])
-    def propor(self, request, pk=None): return self._transicao(request, 'PROPOSTO', pk)
+    def propor(self, request, pk=None):
+        return self._transicao(request, 'PROPOSTO', pk)
+
     @action(detail=True, methods=['post'])
-    def aprovar(self, request, pk=None): return self._transicao(request, 'APROVADO', pk)
+    def aprovar(self, request, pk=None):
+        return self._transicao(request, 'APROVADO', pk)
+
     @action(detail=True, methods=['post'])
-    def iniciar(self, request, pk=None): return self._transicao(request, 'EM_ANDAMENTO', pk)
+    def iniciar(self, request, pk=None):
+        return self._transicao(request, 'EM_ANDAMENTO', pk)
+
     @action(detail=True, methods=['post'])
-    def concluir(self, request, pk=None): return self._transicao(request, 'CONCLUIDO', pk)
+    def concluir(self, request, pk=None):
+        return self._transicao(request, 'CONCLUIDO', pk)
+
     @action(detail=True, methods=['post'])
-    def cancelar(self, request, pk=None): return self._transicao(request, 'CANCELADO', pk)
+    def cancelar(self, request, pk=None):
+        return self._transicao(request, 'CANCELADO', pk)
 
 
 class ItemPlanoTratamentoViewSet(ClinicoBaseViewSet):
@@ -682,7 +787,17 @@ class OrcamentoViewSet(FinanceiroBaseViewSet):
     def update(self, request, *args, **kwargs):
         self.exige_profissional()
         orcamento = self.get_object()
-        bloqueados = {'clinica', 'paciente', 'plano_tratamento', 'status', 'subtotal', 'total', 'valor_pago', 'saldo', 'criado_por'} & set(request.data)
+        bloqueados = {
+            'clinica',
+            'paciente',
+            'plano_tratamento',
+            'status',
+            'subtotal',
+            'total',
+            'valor_pago',
+            'saldo',
+            'criado_por',
+        } & set(request.data)
         if bloqueados:
             raise ValidationError({campo: 'Campo imutavel nesta rota.' for campo in bloqueados})
         if orcamento.status != 'RASCUNHO':
@@ -694,7 +809,9 @@ class OrcamentoViewSet(FinanceiroBaseViewSet):
     partial_update = update
 
     def destroy(self, request, *args, **kwargs):
-        return Response({'detail': 'Orcamentos nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response(
+            {'detail': 'Orcamentos nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
 
     def _transicao(self, request, destino):
         if destino == 'ENVIADO':
@@ -743,7 +860,9 @@ class ItemOrcamentoViewSet(FinanceiroBaseViewSet):
     queryset = ItemOrcamento.objects.none()
 
     def get_queryset(self):
-        queryset = ItemOrcamento.objects.select_related('orcamento__paciente', 'procedimento_ref', 'item_plano_tratamento')
+        queryset = ItemOrcamento.objects.select_related(
+            'orcamento__paciente', 'procedimento_ref', 'item_plano_tratamento'
+        )
         return self.financeiro_queryset(queryset, 'orcamento__clinica_id', 'orcamento__paciente')
 
     def perform_create(self, serializer):
@@ -753,7 +872,9 @@ class ItemOrcamentoViewSet(FinanceiroBaseViewSet):
             raise ValidationError({'orcamento': 'Orcamento pertence a outra clinica.'})
         if orcamento.status in {'APROVADO', 'REJEITADO', 'CANCELADO', 'VENCIDO'}:
             raise ValidationError({'orcamento': 'Orcamento neste status nao aceita itens.'})
-        item = serializer.save(subtotal=dinheiro(serializer.validated_data['quantidade'] * serializer.validated_data['valor_unitario']))
+        item = serializer.save(
+            subtotal=dinheiro(serializer.validated_data['quantidade'] * serializer.validated_data['valor_unitario'])
+        )
         recalcular_orcamento(item.orcamento)
 
     def update(self, request, *args, **kwargs):
@@ -773,7 +894,10 @@ class ItemOrcamentoViewSet(FinanceiroBaseViewSet):
     partial_update = update
 
     def destroy(self, request, *args, **kwargs):
-        return Response({'detail': 'Itens de orcamento nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response(
+            {'detail': 'Itens de orcamento nao podem ser excluidos fisicamente.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
 
 class ParcelaViewSet(FinanceiroBaseViewSet):
@@ -792,12 +916,16 @@ class ParcelaViewSet(FinanceiroBaseViewSet):
         raise PermissionDenied('Parcelas sao geradas pela acao de parcelamento.')
 
     def update(self, request, *args, **kwargs):
-        return Response({'detail': 'Parcelas nao podem ser alteradas livremente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response(
+            {'detail': 'Parcelas nao podem ser alteradas livremente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
 
     partial_update = update
 
     def destroy(self, request, *args, **kwargs):
-        return Response({'detail': 'Parcelas nao podem ser excluidas fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response(
+            {'detail': 'Parcelas nao podem ser excluidas fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
 
 
 class PagamentoViewSet(FinanceiroBaseViewSet):
@@ -809,7 +937,9 @@ class PagamentoViewSet(FinanceiroBaseViewSet):
     ordering = ['-pago_em']
 
     def get_queryset(self):
-        return self.financeiro_queryset(Pagamento.objects.select_related('clinica', 'paciente', 'orcamento', 'parcela', 'registrado_por'))
+        return self.financeiro_queryset(
+            Pagamento.objects.select_related('clinica', 'paciente', 'orcamento', 'parcela', 'registrado_por')
+        )
 
     def create(self, request, *args, **kwargs):
         if not request.user.is_staff:
@@ -832,12 +962,181 @@ class PagamentoViewSet(FinanceiroBaseViewSet):
         return Response(self.get_serializer(pagamento).data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        return Response({'detail': 'Pagamentos registrados nao podem ser alterados livremente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response(
+            {'detail': 'Pagamentos registrados nao podem ser alterados livremente.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     partial_update = update
 
     def destroy(self, request, *args, **kwargs):
-        return Response({'detail': 'Pagamentos nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response(
+            {'detail': 'Pagamentos nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
+
+
+class ArquivoClinicoViewSet(viewsets.ModelViewSet):
+    serializer_class = ArquivoClinicoSerializer
+    queryset = ArquivoClinico.objects.none()
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['paciente', 'categoria', 'ativo']
+
+    def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return ArquivoClinico.objects.none()
+        usuario, queryset = (
+            self.request.user,
+            ArquivoClinico.objects.select_related('paciente', 'clinica', 'prontuario', 'agendamento'),
+        )
+        if usuario.is_staff:
+            return queryset
+        if not usuario.clinica_id:
+            return queryset.none()
+        if usuario.tipo == 'PACIENTE':
+            return queryset.filter(clinica=usuario.clinica, paciente=usuario, liberado_paciente=True)
+        if usuario.tipo == 'DENTISTA':
+            return queryset.filter(clinica=usuario.clinica)
+        return queryset.none()
+
+    def perform_create(self, serializer):
+        usuario, paciente = self.request.user, serializer.validated_data['paciente']
+        if usuario.tipo == 'PACIENTE' and not usuario.is_staff and paciente != usuario:
+            raise PermissionDenied('Paciente so pode enviar arquivos para si.')
+        if not usuario.is_staff and (not usuario.clinica_id or paciente.clinica_id != usuario.clinica_id):
+            raise ValidationError({'paciente': 'Paciente pertence a outra clinica.'})
+        serializer.save(clinica=paciente.clinica, enviado_por=usuario)
+
+    def update(self, request, *args, **kwargs):
+        campos = {'arquivo', 'clinica', 'paciente', 'prontuario', 'agendamento', 'hash_sha256', 'enviado_por'} & set(
+            request.data
+        )
+        if campos:
+            raise ValidationError({campo: 'Campo imutavel apos o envio.' for campo in campos})
+        return super().update(request, *args, **kwargs)
+
+    partial_update = update
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Arquivos clinicos nao podem ser excluidos fisicamente.'}, status=405)
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        arquivo = self.get_object()
+        if not arquivo.ativo:
+            raise NotFound()
+        AcessoArquivoClinico.objects.create(
+            arquivo=arquivo,
+            usuario=request.user,
+            acao='DOWNLOAD',
+            ip=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:512],
+        )
+        resposta = FileResponse(
+            arquivo.arquivo.open('rb'),
+            as_attachment=True,
+            filename=arquivo.nome_exibicao or arquivo.nome_original,
+            content_type=arquivo.mime_type,
+        )
+        resposta['X-Content-Type-Options'], resposta['Cache-Control'] = 'nosniff', 'private, no-store'
+        return resposta
+
+    @action(detail=True, methods=['post'])
+    def desativar(self, request, pk=None):
+        arquivo = self.get_object()
+        if request.user.tipo == 'PACIENTE' and not request.user.is_staff:
+            raise PermissionDenied('Paciente nao pode desativar arquivo clinico.')
+        arquivo.ativo = False
+        arquivo.save(update_fields=['ativo', 'atualizado_em'])
+        AcessoArquivoClinico.objects.create(
+            arquivo=arquivo,
+            usuario=request.user,
+            acao='DESATIVACAO',
+            ip=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:512],
+        )
+        return Response(self.get_serializer(arquivo).data)
+
+
+class TermoConsentimentoViewSet(viewsets.ModelViewSet):
+    serializer_class, queryset, permission_classes = (
+        TermoConsentimentoSerializer,
+        TermoConsentimento.objects.none(),
+        [permissions.IsAuthenticated],
+    )
+
+    def get_queryset(self):
+        usuario, queryset = self.request.user, TermoConsentimento.objects.all()
+        if usuario.is_staff:
+            return queryset
+        if not usuario.clinica_id:
+            return queryset.none()
+        filtros = models.Q(clinica__isnull=True) | models.Q(clinica=usuario.clinica)
+        return queryset.filter(filtros, ativo=True) if usuario.tipo == 'PACIENTE' else queryset.filter(filtros)
+
+    def perform_create(self, serializer):
+        if not self.request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode criar termos.')
+        serializer.save(criado_por=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        termo = self.get_object()
+        if not request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode alterar termos.')
+        if termo.publicado_em and 'conteudo' in request.data:
+            raise ValidationError({'conteudo': 'Termo publicado e imutavel; crie uma nova versao.'})
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def aceitar(self, request, pk=None):
+        termo = self.get_object()
+        if not termo.ativo:
+            raise ValidationError({'termo': 'Termo inativo nao aceita novos consentimentos.'})
+        paciente = request.user
+        if paciente.tipo != 'PACIENTE' and not paciente.is_staff:
+            paciente = Usuario.objects.filter(pk=request.data.get('paciente'), clinica=request.user.clinica).first()
+            if not paciente:
+                raise NotFound()
+        if termo.clinica_id and termo.clinica_id != paciente.clinica_id:
+            raise NotFound()
+        item = ConsentimentoPaciente.objects.create(
+            clinica=paciente.clinica,
+            paciente=paciente,
+            termo=termo,
+            ip=request.META.get('REMOTE_ADDR'),
+            user_agent=request.META.get('HTTP_USER_AGENT', '')[:512],
+            registrado_por=request.user,
+        )
+        return Response(ConsentimentoPacienteSerializer(item).data, status=201)
+
+
+class ConsentimentoPacienteViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class, queryset, permission_classes = (
+        ConsentimentoPacienteSerializer,
+        ConsentimentoPaciente.objects.none(),
+        [permissions.IsAuthenticated],
+    )
+
+    def get_queryset(self):
+        usuario = self.request.user
+        if usuario.is_staff:
+            return ConsentimentoPaciente.objects.all()
+        return (
+            ConsentimentoPaciente.objects.filter(paciente=usuario)
+            if usuario.tipo == 'PACIENTE'
+            else ConsentimentoPaciente.objects.filter(clinica=usuario.clinica)
+        )
+
+    @action(detail=True, methods=['post'])
+    def revogar(self, request, pk=None):
+        item = self.get_object()
+        if not request.user.is_staff and item.paciente != request.user:
+            raise NotFound()
+        if item.revogado_em:
+            raise ValidationError({'detail': 'Consentimento ja foi revogado.'})
+        item.revogado_em = timezone.now()
+        item.save(update_fields=['revogado_em'])
+        return Response(self.get_serializer(item).data)
 
 
 class AgendamentoViewSet(viewsets.ModelViewSet):
