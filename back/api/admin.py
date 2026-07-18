@@ -12,8 +12,12 @@ from .models import (
     EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
+    ItemOrcamento,
     ItemPlanoTratamento,
     Odontograma,
+    Orcamento,
+    Pagamento,
+    Parcela,
     PlanoTratamento,
     Procedimento,
     ProntuarioPaciente,
@@ -152,6 +156,38 @@ class ItemPlanoTratamentoAdmin(admin.ModelAdmin):
     list_filter = ('plano__clinica', 'prioridade', 'status', 'criado_em')
     search_fields = ('plano__titulo', 'plano__prontuario__paciente__nome_completo', 'descricao')
     readonly_fields = ('plano', 'criado_em', 'atualizado_em')
+
+
+@admin.register(Orcamento)
+class OrcamentoAdmin(admin.ModelAdmin):
+    list_display = ('titulo', 'clinica', 'paciente', 'status', 'total', 'valor_pago', 'saldo', 'validade_em', 'ativo')
+    list_filter = ('clinica', 'status', 'ativo', 'validade_em', 'criado_em')
+    search_fields = ('titulo', 'paciente__nome_completo', 'paciente__cpf', 'plano_tratamento__titulo')
+    readonly_fields = ('clinica', 'subtotal', 'total', 'valor_pago', 'saldo', 'criado_por', 'aprovado_em', 'rejeitado_em', 'cancelado_em', 'criado_em', 'atualizado_em')
+
+
+@admin.register(ItemOrcamento)
+class ItemOrcamentoAdmin(admin.ModelAdmin):
+    list_display = ('orcamento', 'descricao', 'quantidade', 'valor_unitario', 'subtotal', 'procedimento_ref', 'ativo')
+    list_filter = ('orcamento__clinica', 'ativo', 'criado_em')
+    search_fields = ('orcamento__titulo', 'orcamento__paciente__nome_completo', 'descricao')
+    readonly_fields = ('subtotal', 'criado_em', 'atualizado_em')
+
+
+@admin.register(Parcela)
+class ParcelaAdmin(admin.ModelAdmin):
+    list_display = ('orcamento', 'numero', 'clinica', 'valor', 'vencimento', 'status', 'paga_em', 'ativo')
+    list_filter = ('clinica', 'status', 'ativo', 'vencimento', 'paga_em')
+    search_fields = ('orcamento__titulo', 'orcamento__paciente__nome_completo')
+    readonly_fields = ('clinica', 'orcamento', 'numero', 'valor', 'status', 'paga_em', 'criado_em', 'atualizado_em')
+
+
+@admin.register(Pagamento)
+class PagamentoAdmin(admin.ModelAdmin):
+    list_display = ('orcamento', 'paciente', 'clinica', 'parcela', 'valor', 'forma_pagamento', 'pago_em', 'registrado_por', 'ativo')
+    list_filter = ('clinica', 'forma_pagamento', 'ativo', 'pago_em', 'criado_em')
+    search_fields = ('orcamento__titulo', 'paciente__nome_completo', 'referencia_externa', 'observacao')
+    readonly_fields = ('clinica', 'paciente', 'orcamento', 'parcela', 'valor', 'forma_pagamento', 'pago_em', 'referencia_externa', 'registrado_por', 'criado_em')
 
 
 admin.site.register(Endereco)

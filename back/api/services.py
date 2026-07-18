@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
@@ -6,7 +7,15 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
 
-from .models import Agendamento, BloqueioAgendaClinica, HorarioFuncionamentoClinica, IndisponibilidadeDentista
+from .models import (
+    Agendamento,
+    BloqueioAgendaClinica,
+    HorarioFuncionamentoClinica,
+    IndisponibilidadeDentista,
+    Orcamento,
+    Pagamento,
+    Parcela,
+)
 
 
 class ConflitoAgenda(APIException):
@@ -252,3 +261,93 @@ def transicionar_plano(plano, novo_status):
         plano.concluido_em = agora
     plano.save()
     return plano
+
+
+CENTAVO = Decimal('0.01')
+TRANSICOES_ORCAMENTO = {
+    'RASCUNHO': {'ENVIADO', 'CANCELADO'},
+    'ENVIADO': {'APROVADO', 'REJEITADO', 'CANCELADO'},
+}
+
+
+def dinheiro(valor):
+    return Decimal(valor).quantize(CENTAVO, rounding=ROUND_HALF_UP)
+
+
+def recalcular_orcamento(orcamento):
+    subtotal = sum((item.subtotal for item in orcamento.itens.filter(ativo=True)), Decimal('0'))
+    subtotal = dinheiro(subtotal)
+    if orcamento.desconto_tipo == 'PERCENTUAL':
+        desconto = dinheiro(subtotal * orcamento.desconto_valor / Decimal('100'))
+    elif orcamento.desconto_tipo == 'VALOR':
+        desconto = dinheiro(orcamento.desconto_valor)
+    else:
+        desconto = Decimal('0.00')
+    total = dinheiro(subtotal - desconto)
+    pago = dinheiro(sum((p.valor for p in orcamento.pagamentos.filter(ativo=True)), Decimal('0')))
+    if desconto > subtotal:
+        raise ValidationError({'desconto_valor': 'Desconto nao pode ser maior que o subtotal.'})
+    orcamento.subtotal, orcamento.total, orcamento.valor_pago, orcamento.saldo = subtotal, total, pago, dinheiro(total - pago)
+    orcamento.save(update_fields=['subtotal', 'total', 'valor_pago', 'saldo', 'atualizado_em'])
+    return orcamento
+
+
+def transicionar_orcamento(orcamento, destino):
+    if destino not in TRANSICOES_ORCAMENTO.get(orcamento.status, set()):
+        raise ValidationError({'status': f'Transicao de {orcamento.status} para {destino} nao permitida.'})
+    if destino == 'APROVADO' and not orcamento.itens.filter(ativo=True).exists():
+        raise ValidationError({'status': 'Orcamento sem itens nao pode ser aprovado.'})
+    if destino == 'CANCELADO' and orcamento.pagamentos.filter(ativo=True).exists():
+        raise ValidationError({'status': 'Orcamento com pagamentos nao pode ser cancelado.'})
+    orcamento.status = destino
+    agora = timezone.now()
+    if destino == 'APROVADO':
+        orcamento.aprovado_em = agora
+    if destino == 'REJEITADO':
+        orcamento.rejeitado_em = agora
+    if destino == 'CANCELADO':
+        orcamento.cancelado_em = agora
+    orcamento.save()
+    return orcamento
+
+
+def gerar_parcelas(orcamento, quantidade, primeiro_vencimento, intervalo_dias=30):
+    if orcamento.status != 'APROVADO':
+        raise ValidationError({'status': 'Apenas orcamentos aprovados podem ser parcelados.'})
+    if quantidade <= 0:
+        raise ValidationError({'quantidade_parcelas': 'Quantidade deve ser maior que zero.'})
+    with transaction.atomic():
+        orcamento = Orcamento.objects.select_for_update().get(pk=orcamento.pk)
+        if orcamento.parcelas.exists() or orcamento.pagamentos.filter(ativo=True).exists():
+            raise ValidationError({'parcelas': 'Orcamento ja possui movimentacao financeira.'})
+        base = dinheiro(orcamento.total / quantidade)
+        valores = [base] * quantidade
+        valores[-1] = dinheiro(orcamento.total - sum(valores[:-1], Decimal('0')))
+        if any(valor <= 0 for valor in valores):
+            raise ValidationError({'quantidade_parcelas': 'Parcelamento gera parcela com valor zero.'})
+        for numero, valor in enumerate(valores, 1):
+            Parcela.objects.create(clinica=orcamento.clinica, orcamento=orcamento, numero=numero, valor=valor, vencimento=primeiro_vencimento + timedelta(days=intervalo_dias * (numero - 1)))
+    return orcamento
+
+
+def registrar_pagamento(*, orcamento, parcela, valor, forma_pagamento, usuario, observacao='', referencia_externa=None, pago_em=None):
+    with transaction.atomic():
+        orcamento = Orcamento.objects.select_for_update().get(pk=orcamento.pk)
+        if orcamento.status in {'CANCELADO', 'REJEITADO'}:
+            raise ValidationError({'orcamento': 'Orcamento cancelado ou rejeitado nao aceita pagamento.'})
+        valor = dinheiro(valor)
+        if valor <= 0 or valor > orcamento.saldo:
+            raise ValidationError({'valor': 'Valor deve ser maior que zero e nao pode exceder o saldo.'})
+        if parcela:
+            parcela = Parcela.objects.select_for_update().get(pk=parcela.pk)
+            if parcela.orcamento_id != orcamento.id or parcela.status == 'CANCELADA':
+                raise ValidationError({'parcela': 'Parcela invalida ou cancelada.'})
+            pago_parcela = sum((p.valor for p in parcela.pagamentos.filter(ativo=True)), Decimal('0'))
+            if valor > dinheiro(parcela.valor - pago_parcela):
+                raise ValidationError({'valor': 'Valor excede o saldo da parcela.'})
+        pagamento = Pagamento.objects.create(clinica=orcamento.clinica, paciente=orcamento.paciente, orcamento=orcamento, parcela=parcela, valor=valor, forma_pagamento=forma_pagamento, pago_em=pago_em or timezone.now(), observacao=observacao, referencia_externa=referencia_externa, registrado_por=usuario)
+        if parcela and dinheiro(sum((p.valor for p in parcela.pagamentos.filter(ativo=True)), Decimal('0'))) == parcela.valor:
+            parcela.status, parcela.paga_em = 'PAGA', pagamento.pago_em
+            parcela.save(update_fields=['status', 'paga_em', 'atualizado_em'])
+        recalcular_orcamento(orcamento)
+    return pagamento

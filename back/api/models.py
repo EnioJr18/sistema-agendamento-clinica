@@ -421,3 +421,87 @@ class ItemPlanoTratamento(models.Model):
 
     class Meta:
         ordering = ['ordem', 'id']
+
+
+class Orcamento(models.Model):
+    STATUS_CHOICES = [(v, v.title()) for v in ('RASCUNHO', 'ENVIADO', 'APROVADO', 'REJEITADO', 'CANCELADO', 'VENCIDO')]
+    DESCONTO_CHOICES = [(v, v.title()) for v in ('NENHUM', 'VALOR', 'PERCENTUAL')]
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='orcamentos')
+    paciente = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='orcamentos')
+    plano_tratamento = models.ForeignKey(PlanoTratamento, on_delete=models.PROTECT, null=True, blank=True, related_name='orcamentos')
+    titulo = models.CharField(max_length=150)
+    descricao = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='RASCUNHO')
+    validade_em = models.DateField(null=True, blank=True)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    desconto_tipo = models.CharField(max_length=12, choices=DESCONTO_CHOICES, default='NENHUM')
+    desconto_valor = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    valor_pago = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    saldo = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='orcamentos_criados')
+    aprovado_em = models.DateTimeField(null=True, blank=True)
+    rejeitado_em = models.DateTimeField(null=True, blank=True)
+    cancelado_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+        indexes = [models.Index(fields=['clinica', 'paciente', 'status'])]
+
+
+class ItemOrcamento(models.Model):
+    orcamento = models.ForeignKey(Orcamento, on_delete=models.PROTECT, related_name='itens')
+    item_plano_tratamento = models.ForeignKey(ItemPlanoTratamento, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_orcamento')
+    procedimento_ref = models.ForeignKey(Procedimento, on_delete=models.PROTECT, null=True, blank=True, related_name='itens_orcamento')
+    descricao = models.TextField()
+    quantidade = models.PositiveSmallIntegerField(default=1)
+    valor_unitario = models.DecimalField(max_digits=12, decimal_places=2)
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0, editable=False)
+    numero_dente = models.PositiveSmallIntegerField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['id']
+
+
+class Parcela(models.Model):
+    STATUS_CHOICES = [(v, v.title()) for v in ('PENDENTE', 'PAGA', 'VENCIDA', 'CANCELADA')]
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='parcelas')
+    orcamento = models.ForeignKey(Orcamento, on_delete=models.PROTECT, related_name='parcelas')
+    numero = models.PositiveSmallIntegerField()
+    valor = models.DecimalField(max_digits=12, decimal_places=2)
+    vencimento = models.DateField()
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default='PENDENTE')
+    paga_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['numero']
+        constraints = [models.UniqueConstraint(fields=['orcamento', 'numero'], name='parcela_numero_unico_por_orcamento')]
+
+
+class Pagamento(models.Model):
+    FORMAS_CHOICES = [(v, v.replace('_', ' ').title()) for v in ('DINHEIRO', 'PIX', 'CARTAO_CREDITO', 'CARTAO_DEBITO', 'TRANSFERENCIA', 'OUTRO')]
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name='pagamentos')
+    paciente = models.ForeignKey(Usuario, on_delete=models.PROTECT, related_name='pagamentos')
+    orcamento = models.ForeignKey(Orcamento, on_delete=models.PROTECT, related_name='pagamentos')
+    parcela = models.ForeignKey(Parcela, on_delete=models.PROTECT, null=True, blank=True, related_name='pagamentos')
+    valor = models.DecimalField(max_digits=12, decimal_places=2)
+    forma_pagamento = models.CharField(max_length=20, choices=FORMAS_CHOICES)
+    pago_em = models.DateTimeField(default=timezone.now)
+    observacao = models.TextField(blank=True)
+    referencia_externa = models.CharField(max_length=100, blank=True, null=True)
+    registrado_por = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, related_name='pagamentos_registrados')
+    criado_em = models.DateTimeField(auto_now_add=True)
+    ativo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-pago_em', '-id']
+        constraints = [models.UniqueConstraint(fields=['clinica', 'referencia_externa'], condition=models.Q(referencia_externa__isnull=False), name='pagamento_referencia_unica_por_clinica')]

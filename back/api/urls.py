@@ -10,8 +10,12 @@ from .views import (
     EvolucaoClinicaViewSet,
     HorarioFuncionamentoClinicaViewSet,
     IndisponibilidadeDentistaViewSet,
+    ItemOrcamentoViewSet,
     ItemPlanoTratamentoViewSet,
     OdontogramaViewSet,
+    OrcamentoViewSet,
+    PagamentoViewSet,
+    ParcelaViewSet,
     PlanoTratamentoViewSet,
     ProcedimentoViewSet,
     ProntuarioPacienteViewSet,
@@ -36,6 +40,10 @@ router.register(r'odontogramas', OdontogramaViewSet, basename='odontograma')
 router.register(r'registros-odontograma', RegistroOdontogramaViewSet, basename='registro-odontograma')
 router.register(r'planos-tratamento', PlanoTratamentoViewSet, basename='plano-tratamento')
 router.register(r'itens-plano-tratamento', ItemPlanoTratamentoViewSet, basename='item-plano-tratamento')
+router.register(r'orcamentos', OrcamentoViewSet, basename='orcamento')
+router.register(r'itens-orcamento', ItemOrcamentoViewSet, basename='item-orcamento')
+router.register(r'parcelas', ParcelaViewSet, basename='parcela')
+router.register(r'pagamentos', PagamentoViewSet, basename='pagamento')
 
 urlpatterns = [
     path('', include(router.urls)),

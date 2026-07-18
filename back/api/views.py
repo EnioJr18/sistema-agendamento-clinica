@@ -18,8 +18,12 @@ from .models import (
     EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
+    ItemOrcamento,
     ItemPlanoTratamento,
     Odontograma,
+    Orcamento,
+    Pagamento,
+    Parcela,
     PlanoTratamento,
     Procedimento,
     ProntuarioPaciente,
@@ -38,8 +42,13 @@ from .serializers import (
     EvolucaoClinicaSerializer,
     HorarioFuncionamentoClinicaSerializer,
     IndisponibilidadeDentistaSerializer,
+    ItemOrcamentoSerializer,
     ItemPlanoTratamentoSerializer,
     OdontogramaSerializer,
+    OrcamentoSerializer,
+    PagamentoSerializer,
+    ParcelarOrcamentoSerializer,
+    ParcelaSerializer,
     PerfilUsuarioSerializer,
     PlanoTratamentoSerializer,
     ProcedimentoSerializer,
@@ -53,8 +62,13 @@ from .services import (
     cancelar_agendamento,
     concluir_agendamento,
     confirmar_agendamento,
+    dinheiro,
+    gerar_parcelas,
     marcar_falta_agendamento,
     reagendar_agendamento,
+    recalcular_orcamento,
+    registrar_pagamento,
+    transicionar_orcamento,
     transicionar_plano,
     validar_contexto_odontologico,
     validar_criacao_evolucao,
@@ -620,6 +634,210 @@ class ItemPlanoTratamentoViewSet(ClinicoBaseViewSet):
         return super().update(request, *args, **kwargs)
 
     partial_update = update
+
+
+class FinanceiroBaseViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def financeiro_queryset(self, queryset, clinica_field='clinica_id', paciente_field='paciente'):
+        if getattr(self, 'swagger_fake_view', False):
+            return queryset.none()
+        usuario = self.request.user
+        if usuario.is_staff:
+            return queryset
+        if not usuario.clinica_id:
+            return queryset.none()
+        if usuario.tipo == 'PACIENTE':
+            return queryset.filter(**{clinica_field: usuario.clinica_id, paciente_field: usuario})
+        if usuario.tipo == 'DENTISTA':
+            return queryset.filter(**{clinica_field: usuario.clinica_id})
+        return queryset.none()
+
+    def exige_profissional(self):
+        if self.request.user.is_staff or self.request.user.tipo == 'DENTISTA':
+            return
+        raise PermissionDenied('Paciente nao pode alterar dados financeiros.')
+
+
+class OrcamentoViewSet(FinanceiroBaseViewSet):
+    serializer_class = OrcamentoSerializer
+    queryset = Orcamento.objects.none()
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['paciente', 'status', 'plano_tratamento', 'ativo']
+    ordering_fields = ['criado_em', 'validade_em', 'total', 'saldo']
+    ordering = ['-criado_em']
+
+    def get_queryset(self):
+        return self.financeiro_queryset(
+            Orcamento.objects.select_related('clinica', 'paciente', 'plano_tratamento', 'criado_por'),
+        )
+
+    def perform_create(self, serializer):
+        self.exige_profissional()
+        paciente = serializer.validated_data['paciente']
+        if not self.request.user.is_staff and paciente.clinica_id != self.request.user.clinica_id:
+            raise ValidationError({'paciente': 'Paciente pertence a outra clinica.'})
+        serializer.save(clinica=paciente.clinica, criado_por=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        self.exige_profissional()
+        orcamento = self.get_object()
+        bloqueados = {'clinica', 'paciente', 'plano_tratamento', 'status', 'subtotal', 'total', 'valor_pago', 'saldo', 'criado_por'} & set(request.data)
+        if bloqueados:
+            raise ValidationError({campo: 'Campo imutavel nesta rota.' for campo in bloqueados})
+        if orcamento.status != 'RASCUNHO':
+            raise ValidationError({'status': 'Apenas orcamentos em rascunho podem ser alterados.'})
+        response = super().update(request, *args, **kwargs)
+        recalcular_orcamento(orcamento)
+        return response
+
+    partial_update = update
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Orcamentos nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def _transicao(self, request, destino):
+        if destino == 'ENVIADO':
+            self.exige_profissional()
+        elif not request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode aprovar, rejeitar ou cancelar orcamentos.')
+        with transaction.atomic():
+            orcamento = Orcamento.objects.select_for_update().get(pk=self.get_object().pk)
+            transicionar_orcamento(orcamento, destino)
+        return Response(self.get_serializer(orcamento).data)
+
+    @action(detail=True, methods=['post'])
+    def enviar(self, request, pk=None):
+        return self._transicao(request, 'ENVIADO')
+
+    @action(detail=True, methods=['post'])
+    def aprovar(self, request, pk=None):
+        return self._transicao(request, 'APROVADO')
+
+    @action(detail=True, methods=['post'])
+    def rejeitar(self, request, pk=None):
+        return self._transicao(request, 'REJEITADO')
+
+    @action(detail=True, methods=['post'])
+    def cancelar(self, request, pk=None):
+        return self._transicao(request, 'CANCELADO')
+
+    @extend_schema(request=ParcelarOrcamentoSerializer, responses=ParcelaSerializer(many=True))
+    @action(detail=True, methods=['post'])
+    def parcelar(self, request, pk=None):
+        if not request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode gerar parcelas.')
+        dados = ParcelarOrcamentoSerializer(data=request.data)
+        dados.is_valid(raise_exception=True)
+        orcamento = gerar_parcelas(
+            self.get_object(),
+            dados.validated_data['quantidade_parcelas'],
+            dados.validated_data['primeiro_vencimento'],
+            dados.validated_data['intervalo_dias'],
+        )
+        return Response(ParcelaSerializer(orcamento.parcelas.all(), many=True).data, status=status.HTTP_201_CREATED)
+
+
+class ItemOrcamentoViewSet(FinanceiroBaseViewSet):
+    serializer_class = ItemOrcamentoSerializer
+    queryset = ItemOrcamento.objects.none()
+
+    def get_queryset(self):
+        queryset = ItemOrcamento.objects.select_related('orcamento__paciente', 'procedimento_ref', 'item_plano_tratamento')
+        return self.financeiro_queryset(queryset, 'orcamento__clinica_id', 'orcamento__paciente')
+
+    def perform_create(self, serializer):
+        self.exige_profissional()
+        orcamento = serializer.validated_data['orcamento']
+        if not self.request.user.is_staff and orcamento.clinica_id != self.request.user.clinica_id:
+            raise ValidationError({'orcamento': 'Orcamento pertence a outra clinica.'})
+        if orcamento.status in {'APROVADO', 'REJEITADO', 'CANCELADO', 'VENCIDO'}:
+            raise ValidationError({'orcamento': 'Orcamento neste status nao aceita itens.'})
+        item = serializer.save(subtotal=dinheiro(serializer.validated_data['quantidade'] * serializer.validated_data['valor_unitario']))
+        recalcular_orcamento(item.orcamento)
+
+    def update(self, request, *args, **kwargs):
+        self.exige_profissional()
+        item = self.get_object()
+        if 'orcamento' in request.data:
+            raise ValidationError({'orcamento': 'Item nao pode ser movido para outro orcamento.'})
+        if item.orcamento.status in {'APROVADO', 'REJEITADO', 'CANCELADO', 'VENCIDO'}:
+            raise ValidationError({'orcamento': 'Orcamento neste status nao aceita alteracoes de itens.'})
+        response = super().update(request, *args, **kwargs)
+        item.refresh_from_db()
+        item.subtotal = dinheiro(item.quantidade * item.valor_unitario)
+        item.save(update_fields=['subtotal', 'atualizado_em'])
+        recalcular_orcamento(item.orcamento)
+        return response
+
+    partial_update = update
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Itens de orcamento nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class ParcelaViewSet(FinanceiroBaseViewSet):
+    serializer_class = ParcelaSerializer
+    queryset = Parcela.objects.none()
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['orcamento', 'status', 'vencimento', 'ativo']
+    ordering_fields = ['vencimento', 'numero', 'criado_em']
+    ordering = ['vencimento', 'numero']
+
+    def get_queryset(self):
+        queryset = Parcela.objects.select_related('clinica', 'orcamento__paciente')
+        return self.financeiro_queryset(queryset, 'clinica_id', 'orcamento__paciente')
+
+    def create(self, request, *args, **kwargs):
+        raise PermissionDenied('Parcelas sao geradas pela acao de parcelamento.')
+
+    def update(self, request, *args, **kwargs):
+        return Response({'detail': 'Parcelas nao podem ser alteradas livremente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    partial_update = update
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Parcelas nao podem ser excluidas fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+
+class PagamentoViewSet(FinanceiroBaseViewSet):
+    serializer_class = PagamentoSerializer
+    queryset = Pagamento.objects.none()
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['orcamento', 'parcela', 'forma_pagamento', 'pago_em', 'ativo']
+    ordering_fields = ['pago_em', 'criado_em', 'valor']
+    ordering = ['-pago_em']
+
+    def get_queryset(self):
+        return self.financeiro_queryset(Pagamento.objects.select_related('clinica', 'paciente', 'orcamento', 'parcela', 'registrado_por'))
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            raise PermissionDenied('Apenas staff/admin pode registrar pagamentos.')
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            pagamento = registrar_pagamento(
+                orcamento=serializer.validated_data['orcamento'],
+                parcela=serializer.validated_data.get('parcela'),
+                valor=serializer.validated_data['valor'],
+                forma_pagamento=serializer.validated_data['forma_pagamento'],
+                usuario=request.user,
+                observacao=serializer.validated_data.get('observacao', ''),
+                referencia_externa=serializer.validated_data.get('referencia_externa'),
+                pago_em=serializer.validated_data.get('pago_em'),
+            )
+        except IntegrityError as exc:
+            raise ValidationError({'referencia_externa': 'Referencia externa ja utilizada nesta clinica.'}) from exc
+        return Response(self.get_serializer(pagamento).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        return Response({'detail': 'Pagamentos registrados nao podem ser alterados livremente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    partial_update = update
+
+    def destroy(self, request, *args, **kwargs):
+        return Response({'detail': 'Pagamentos nao podem ser excluidos fisicamente.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class AgendamentoViewSet(viewsets.ModelViewSet):

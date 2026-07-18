@@ -45,6 +45,10 @@ Authorization: Bearer <access_token>
 - `/api/v1/registros-odontograma/`
 - `/api/v1/planos-tratamento/`
 - `/api/v1/itens-plano-tratamento/`
+- `/api/v1/orcamentos/`
+- `/api/v1/itens-orcamento/`
+- `/api/v1/parcelas/`
+- `/api/v1/pagamentos/`
 
 Usuarios comuns acessam apenas dados da propria clinica. Staff/admin pode administrar globalmente nesta etapa.
 
@@ -148,6 +152,18 @@ O odontograma e clinicamente vinculado ao prontuario, com uma instancia ativa po
 A numeracao aceita dentes permanentes FDI: `11-18`, `21-28`, `31-38` e `41-48`. Faces: `VESTIBULAR`, `LINGUAL`, `PALATINA`, `MESIAL`, `DISTAL`, `OCLUSAL`, `INCISAL`, `GERAL`. Condicoes: `SAUDAVEL`, `CARIE`, `RESTAURADO`, `AUSENTE`, `FRATURADO`, `IMPLANTE`, `COROA`, `TRATAMENTO_CANAL`, `EXTRACAO_INDICADA`, `PROTESE` e `OUTRO`.
 
 Planos de tratamento iniciam em `RASCUNHO`; seu status so muda por acoes explicitas: `propor`, `aprovar`, `iniciar`, `concluir` e `cancelar`. As transicoes permitidas sao `RASCUNHO -> PROPOSTO -> APROVADO -> EM_ANDAMENTO -> CONCLUIDO`, com cancelamento a partir de `PROPOSTO`, `APROVADO` ou `EM_ANDAMENTO`. Planos `CONCLUIDO` e `CANCELADO` nao aceitam novos itens. Um item pode referenciar um procedimento da mesma clinica, mas esta sprint nao implementa financeiro, anexos ou interface visual do odontograma.
+
+## Financeiro: orcamentos e pagamentos manuais (Sprint 11)
+
+Orcamentos iniciam em `RASCUNHO` e possuem itens, desconto e totais calculados exclusivamente no backend com `Decimal` e arredondamento de duas casas. Os campos `subtotal`, `total`, `valor_pago` e `saldo` sao somente leitura. Descontos podem ser `NENHUM`, `VALOR` ou `PERCENTUAL`; percentual fica entre 0 e 100, e desconto em valor nao pode superar o subtotal.
+
+As transicoes sao explicitas: `RASCUNHO -> ENVIADO -> APROVADO` ou `REJEITADO`, e cancelamento a partir de `RASCUNHO` ou `ENVIADO`. Orcamento aprovado exige ao menos um item. Aprovacao, rejeicao e cancelamento sao administrativos; nao ha alteracao direta de status por `PATCH`/`PUT`. Orcamentos aprovados, rejeitados, cancelados ou vencidos nao aceitam itens. Nao ha exclusao fisica pela API.
+
+Parcelas sao geradas por `POST /api/v1/orcamentos/{id}/parcelar/` apenas para orcamento aprovado. O payload recebe `quantidade_parcelas`, `primeiro_vencimento` e `intervalo_dias` opcional. A diferenca de arredondamento fica na ultima parcela, e o fluxo nao permite gerar parcelas duas vezes.
+
+Pagamentos sao registros manuais em `POST /api/v1/pagamentos/`, feitos por staff/admin, com formas `DINHEIRO`, `PIX`, `CARTAO_CREDITO`, `CARTAO_DEBITO`, `TRANSFERENCIA` ou `OUTRO`. `PIX` e cartao sao apenas classificacoes do registro: esta sprint nao integra gateway, nao gera Pix real, nao emite documento fiscal e nao faz conciliacao, estorno ou cobranca recorrente. Cada pagamento atualiza o valor pago e saldo do orcamento; a parcela e marcada como `PAGA` quando seu saldo chega a zero. Uma `referencia_externa` opcional e unica por clinica para reduzir repeticao acidental.
+
+Pacientes consultam somente os proprios orcamentos, parcelas e pagamentos, sem escrita. Dentistas consultam apenas dados da propria clinica e podem elaborar orcamentos e itens; pagamentos e aprovacao financeira permanecem administrativos. Clinica, paciente, autoria e valores calculados sao inferidos ou protegidos pelo backend, e recursos de outra clinica retornam `404` para usuarios comuns.
 
 ## Paginacao
 

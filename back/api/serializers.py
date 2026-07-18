@@ -1,5 +1,6 @@
 import re
 from datetime import date
+from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth import password_validation
@@ -18,8 +19,12 @@ from .models import (
     EvolucaoClinica,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
+    ItemOrcamento,
     ItemPlanoTratamento,
     Odontograma,
+    Orcamento,
+    Pagamento,
+    Parcela,
     PlanoTratamento,
     Procedimento,
     ProntuarioPaciente,
@@ -604,3 +609,123 @@ class ItemPlanoTratamentoSerializer(serializers.ModelSerializer):
         if value is not None and value < 0:
             raise serializers.ValidationError('Valor estimado nao pode ser negativo.')
         return value
+
+
+class OrcamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Orcamento
+        fields = [
+            'id', 'clinica', 'paciente', 'plano_tratamento', 'titulo', 'descricao', 'status', 'validade_em',
+            'subtotal', 'desconto_tipo', 'desconto_valor', 'total', 'valor_pago', 'saldo', 'criado_por',
+            'aprovado_em', 'rejeitado_em', 'cancelado_em', 'criado_em', 'atualizado_em', 'ativo',
+        ]
+        read_only_fields = [
+            'id', 'clinica', 'status', 'subtotal', 'total', 'valor_pago', 'saldo', 'criado_por', 'aprovado_em',
+            'rejeitado_em', 'cancelado_em', 'criado_em', 'atualizado_em',
+        ]
+
+    def validate_desconto_valor(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Desconto nao pode ser negativo.')
+        return value
+
+    def validate(self, attrs):
+        paciente = attrs.get('paciente') or getattr(self.instance, 'paciente', None)
+        plano = attrs.get('plano_tratamento') or getattr(self.instance, 'plano_tratamento', None)
+        desconto_tipo = attrs.get('desconto_tipo', getattr(self.instance, 'desconto_tipo', 'NENHUM'))
+        desconto_valor = attrs.get('desconto_valor', getattr(self.instance, 'desconto_valor', Decimal('0.00')))
+        if not paciente:
+            raise serializers.ValidationError({'paciente': 'Informe o paciente.'})
+        if not paciente.clinica_id:
+            raise serializers.ValidationError({'paciente': 'Paciente deve pertencer a uma clinica.'})
+        if plano:
+            if plano.clinica_id != paciente.clinica_id:
+                raise serializers.ValidationError({'plano_tratamento': 'Plano pertence a outra clinica.'})
+            if plano.prontuario.paciente_id != paciente.id:
+                raise serializers.ValidationError({'plano_tratamento': 'Plano pertence a outro paciente.'})
+        if desconto_tipo == 'PERCENTUAL' and desconto_valor > Decimal('100'):
+            raise serializers.ValidationError({'desconto_valor': 'Desconto percentual deve estar entre 0 e 100.'})
+        if desconto_tipo == 'NENHUM' and desconto_valor != 0:
+            raise serializers.ValidationError({'desconto_valor': 'Desconto deve ser zero quando o tipo for NENHUM.'})
+        subtotal = getattr(self.instance, 'subtotal', Decimal('0.00'))
+        if desconto_tipo == 'VALOR' and desconto_valor > subtotal:
+            raise serializers.ValidationError({'desconto_valor': 'Desconto nao pode ser maior que o subtotal.'})
+        return attrs
+
+
+class ItemOrcamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemOrcamento
+        fields = [
+            'id', 'orcamento', 'item_plano_tratamento', 'procedimento_ref', 'descricao', 'quantidade',
+            'valor_unitario', 'subtotal', 'numero_dente', 'criado_em', 'atualizado_em', 'ativo',
+        ]
+        read_only_fields = ['id', 'subtotal', 'criado_em', 'atualizado_em']
+
+    def validate_quantidade(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Quantidade deve ser maior que zero.')
+        return value
+
+    def validate_valor_unitario(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Valor unitario nao pode ser negativo.')
+        return value
+
+    def validate_numero_dente(self, value):
+        if value is not None:
+            validar_dente(value)
+        return value
+
+    def validate(self, attrs):
+        orcamento = attrs.get('orcamento') or getattr(self.instance, 'orcamento', None)
+        item_plano = attrs.get('item_plano_tratamento') or getattr(self.instance, 'item_plano_tratamento', None)
+        procedimento = attrs.get('procedimento_ref') or getattr(self.instance, 'procedimento_ref', None)
+        if not orcamento:
+            raise serializers.ValidationError({'orcamento': 'Informe o orcamento.'})
+        if procedimento and procedimento.clinica_id != orcamento.clinica_id:
+            raise serializers.ValidationError({'procedimento_ref': 'Procedimento pertence a outra clinica.'})
+        if item_plano:
+            if not orcamento.plano_tratamento_id or item_plano.plano_id != orcamento.plano_tratamento_id:
+                raise serializers.ValidationError({'item_plano_tratamento': 'Item deve pertencer ao plano associado ao orcamento.'})
+        return attrs
+
+
+class ParcelaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Parcela
+        fields = ['id', 'clinica', 'orcamento', 'numero', 'valor', 'vencimento', 'status', 'paga_em', 'criado_em', 'atualizado_em', 'ativo']
+        read_only_fields = fields
+
+
+class PagamentoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Pagamento
+        fields = [
+            'id', 'clinica', 'paciente', 'orcamento', 'parcela', 'valor', 'forma_pagamento', 'pago_em',
+            'observacao', 'referencia_externa', 'registrado_por', 'criado_em', 'ativo',
+        ]
+        read_only_fields = ['id', 'clinica', 'paciente', 'registrado_por', 'criado_em', 'ativo']
+
+    def validate_valor(self, value):
+        if value <= 0:
+            raise serializers.ValidationError('Valor deve ser maior que zero.')
+        return value
+
+    def validate(self, attrs):
+        orcamento = attrs.get('orcamento')
+        parcela = attrs.get('parcela')
+        referencia = attrs.get('referencia_externa')
+        if not orcamento:
+            raise serializers.ValidationError({'orcamento': 'Informe o orcamento.'})
+        if parcela and parcela.orcamento_id != orcamento.id:
+            raise serializers.ValidationError({'parcela': 'Parcela pertence a outro orcamento.'})
+        if referencia and Pagamento.objects.filter(clinica=orcamento.clinica, referencia_externa=referencia).exists():
+            raise serializers.ValidationError({'referencia_externa': 'Referencia externa ja utilizada nesta clinica.'})
+        return attrs
+
+
+class ParcelarOrcamentoSerializer(serializers.Serializer):
+    quantidade_parcelas = serializers.IntegerField(min_value=1)
+    primeiro_vencimento = serializers.DateField()
+    intervalo_dias = serializers.IntegerField(min_value=1, required=False, default=30)
