@@ -265,6 +265,16 @@ Os endpoints sao `/api/v1/templates-mensagem/`, `/api/v1/notificacoes/`, `/api/v
 
 Arquitetura futura planejada: `Agenda -> NotificationService -> Celery -> Redis -> Adaptadores -> WhatsApp/Email/SMS/Push`. Redis, Celery, Kafka, WhatsApp, Email, SMS e Push reais nao sao integrados nesta sprint.
 
+## Dashboard e relatorios
+
+Os endpoints administrativos sao `GET /api/v1/dashboard/resumo/`, `/api/v1/relatorios/agendamentos/`, `/api/v1/relatorios/financeiro/`, `/api/v1/relatorios/pacientes/` e `/api/v1/relatorios/procedimentos/`. O dashboard e o relatorio financeiro sao restritos a staff/admin; dentistas podem consultar somente indicadores nao financeiros da propria clinica. Pacientes nao acessam relatorios administrativos.
+
+Os filtros aceitam `periodo=7d|30d|90d|12m` ou `data_inicial` e `data_final` no formato `YYYY-MM-DD`; o padrao e 30 dias. Series de ate 30 dias usam dias; intervalos maiores usam meses e preenchem periodos sem registros com zero. As datas sao delimitadas no timezone da clinica para usuarios nao globais.
+
+No financeiro, `total_orcamentos_aprovados` representa valor contratado, `total_recebido` soma pagamentos ativos, `total_pendente` soma saldos de orcamentos aprovados e `total_vencido` usa apenas orcamentos cujo status ja e `VENCIDO`. Nao existe calculo de ocupacao nesta sprint: bloqueios, indisponibilidades e horarios podem se sobrepor de formas que exigem uma regra adicional validada. Tambem nao ha valor executado por procedimento, pois itens financeiros nao possuem data de execucao clinica.
+
+As exportacoes agregadas e protegidas usam UTF-8 em `/api/v1/relatorios/agendamentos/exportar.csv` e `/api/v1/relatorios/financeiro/exportar.csv`, com os mesmos filtros e permissoes e protecao contra CSV injection.
+
 ## Arquivos clinicos, consentimento e privacidade
 
 - `POST/GET /api/v1/arquivos-clinicos/` recebe PDF, JPEG, PNG ou WEBP; o limite padrao e 10 MB e pode ser ajustado por `ARQUIVO_CLINICO_MAX_TAMANHO_BYTES`.

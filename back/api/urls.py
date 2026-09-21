@@ -28,6 +28,15 @@ from .views import (
     TermoConsentimentoViewSet,
     UsuarioViewSet,
 )
+from .views_reports import (
+    DashboardResumoView,
+    RelatorioAgendamentosCsvView,
+    RelatorioAgendamentosView,
+    RelatorioFinanceiroCsvView,
+    RelatorioFinanceiroView,
+    RelatorioPacientesView,
+    RelatorioProcedimentosView,
+)
 
 router = DefaultRouter()
 
@@ -60,5 +69,12 @@ router.register(r'notificacoes', NotificacaoViewSet, basename='notificacao')
 router.register(r'preferencias-comunicacao', PreferenciaComunicacaoViewSet, basename='preferencia-comunicacao')
 
 urlpatterns = [
+    path('dashboard/resumo/', DashboardResumoView.as_view(), name='dashboard-resumo'),
+    path('relatorios/agendamentos/', RelatorioAgendamentosView.as_view(), name='relatorio-agendamentos'),
+    path('relatorios/agendamentos/exportar.csv', RelatorioAgendamentosCsvView.as_view(), name='relatorio-agendamentos-csv'),
+    path('relatorios/financeiro/', RelatorioFinanceiroView.as_view(), name='relatorio-financeiro'),
+    path('relatorios/financeiro/exportar.csv', RelatorioFinanceiroCsvView.as_view(), name='relatorio-financeiro-csv'),
+    path('relatorios/pacientes/', RelatorioPacientesView.as_view(), name='relatorio-pacientes'),
+    path('relatorios/procedimentos/', RelatorioProcedimentosView.as_view(), name='relatorio-procedimentos'),
     path('', include(router.urls)),
 ]

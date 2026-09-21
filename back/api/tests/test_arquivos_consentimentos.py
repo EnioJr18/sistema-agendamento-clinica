@@ -117,7 +117,11 @@ class ArquivosConsentimentosTest(APITestCase):
                 arquivo_id=envio.data['id'], usuario=self.paciente, acao='DOWNLOAD'
             ).exists()
         )
-        resposta.close()
+        # O APIClient substitui o iterador do FileResponse e zera
+        # ``file_to_stream``. Consumir o stream aciona o fechamento do arquivo
+        # pelo próprio wrapper do cliente de testes, sem fechar a Response
+        # diretamente (o que emite request_finished).
+        list(resposta.streaming_content)
 
     def test_upload_rejeita_vazio_limite_mime_extensao_nome_duplo_e_executavel(self):
         casos = [
