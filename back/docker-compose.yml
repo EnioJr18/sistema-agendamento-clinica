@@ -21,7 +21,7 @@ services:
     environment:
       ENVIRONMENT: development
       DEBUG: "True"
-      SECRET_KEY: dev-only-docker-secret-key
+      SECRET_KEY: dev-only-docker-secret-key-para-ambiente-local-com-mais-de-cinquenta-caracteres
       DATABASE_URL: postgres://clinica:clinica@db:5432/clinica
       ALLOWED_HOSTS: localhost,127.0.0.1,0.0.0.0
       CORS_ALLOWED_ORIGINS: http://localhost:5173

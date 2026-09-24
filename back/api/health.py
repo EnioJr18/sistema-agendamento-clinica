@@ -14,16 +14,32 @@ HealthResponseSerializer = inline_serializer(
     },
 )
 
+LivenessResponseSerializer = inline_serializer(
+    name='LivenessResponse',
+    fields={'status': serializers.CharField()},
+)
+
 
 @extend_schema(
     responses={
-        200: OpenApiResponse(response=HealthResponseSerializer, description='Aplicacao saudavel.'),
-        503: OpenApiResponse(response=HealthResponseSerializer, description='Aplicacao degradada.'),
+        200: OpenApiResponse(response=LivenessResponseSerializer, description='Aplicacao viva.'),
     }
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
+    return Response({'status': 'ok'}, status=status.HTTP_200_OK)
+
+
+@extend_schema(
+    responses={
+        200: OpenApiResponse(response=HealthResponseSerializer, description='Aplicacao e banco saudaveis.'),
+        503: OpenApiResponse(response=HealthResponseSerializer, description='Banco indisponivel.'),
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def readiness_check(request):
     database_ok = True
     http_status = status.HTTP_200_OK
 

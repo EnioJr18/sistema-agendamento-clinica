@@ -196,6 +196,9 @@ Variaveis principais:
 - `ALLOWED_HOSTS`: lista separada por virgula
 - `CORS_ALLOWED_ORIGINS`: lista separada por virgula
 - `FRONTEND_BASE_URL`: URL base opcional para montar link amigavel de convite
+- `JWT_ACCESS_TOKEN_MINUTES` e `JWT_REFRESH_TOKEN_DAYS`: duracao dos tokens JWT (padrao: 5 min e 1 dia)
+- `THROTTLE_TOKEN_RATE`, `THROTTLE_PUBLIC_REGISTRATION_RATE`, `THROTTLE_PASSWORD_CHANGE_RATE` e `THROTTLE_PRESENCE_CONFIRMATION_RATE`: limites por ambiente
+- `SECURE_SSL_REDIRECT`, `SECURE_HSTS_SECONDS`, `SESSION_COOKIE_SECURE` e `CSRF_COOKIE_SECURE`: controles de transporte para producao
 
 Copie `.env.example` para `.env` no desenvolvimento local e ajuste os valores.
 
@@ -249,9 +252,31 @@ docker compose run --rm -e USE_SQLITE_FOR_TESTS=False backend python manage.py t
 
 ## Health check
 
-- `/api/health/`
+- `/api/health/` e liveness: confirma que o processo responde, sem consultar dependencias.
+- `/api/health/ready/` e readiness: confirma aplicacao e banco.
 
-Retorna apenas estado basico da aplicacao e do banco, sem expor segredos.
+Os dois retornam somente estado operacional, sem expor segredos, URLs de conexao ou dados clinicos. Toda resposta recebe `X-Request-ID`; o backend registra apenas metodo, caminho, status, duracao e esse identificador, nunca payloads ou headers de autenticacao.
+
+## Operacao e seguranca
+
+Em producao, `SECRET_KEY`, `DATABASE_URL`, `ALLOWED_HOSTS` e `CORS_ALLOWED_ORIGINS` sao obrigatorios. `DEBUG=True`, hosts curingas e CORS curinga sao rejeitados. HTTPS, cookies seguros e HSTS possuem defaults de producao, mas HSTS para subdominios/preload deve ser habilitado somente apos validacao do dominio.
+
+Refresh tokens sofrem rotacao e blacklist apos uso. Login, refresh, cadastros publicos, troca de senha e confirmacao de presenca usam limites configuraveis. Os limites em memoria atendem o processo unico atual; em multiplas replicas devem usar cache compartilhado (por exemplo, Redis).
+
+O container executa como usuario sem privilegios. O PostgreSQL exposto pelo compose e apenas conveniencia de desenvolvimento; em producao ele deve ficar em rede privada, com credenciais externas ao repositorio.
+
+### Backup e restore
+
+Para PostgreSQL de producao, execute backup logico ao menos diariamente, com retencao definida pela politica de dados e armazenamento criptografado fora do servidor. Teste periodicamente a restauracao em ambiente isolado; backup sem restore testado nao e garantia.
+
+Exemplo para desenvolvimento local:
+
+```powershell
+docker compose exec -T db pg_dump -U clinica -d clinica --format=custom > clinica-dev.dump
+Get-Content -Encoding Byte clinica-dev.dump | docker compose exec -T db pg_restore -U clinica -d clinica --clean --if-exists
+```
+
+Antes de restaurar, interrompa gravacoes, confirme o alvo e proteja o arquivo de backup: ele pode conter dados clinicos e financeiros. Esse procedimento local nao substitui uma politica de backup, monitoramento, criptografia e testes de recuperacao de producao.
 
 ## Notificacoes
 
@@ -288,4 +313,4 @@ Esta base tecnica nao declara conformidade juridica integral com a LGPD. Regras 
 
 ## CI
 
-O workflow `Backend CI` roda em push e pull request para mudancas do backend. Ele instala dependencias, sobe PostgreSQL, roda lint, verifica migrations, executa migrations, testes e coverage. Nao ha deploy configurado nesta sprint.
+O workflow `Backend CI` roda em push e pull request para mudancas do backend. Ele instala dependencias, sobe PostgreSQL, roda lint, `check`, verifica/aplica migrations, executa testes e coverage, compila os modulos e valida o OpenAPI. Nao ha deploy configurado nesta sprint.

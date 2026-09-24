@@ -13,7 +13,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN chmod +x /app/scripts/docker-entrypoint.sh
+RUN chmod +x /app/scripts/docker-entrypoint.sh \
+    && addgroup --system clinica \
+    && adduser --system --ingroup clinica clinica \
+    && chown -R clinica:clinica /app
+
+USER clinica
 
 EXPOSE 8000
 

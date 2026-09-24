@@ -91,6 +91,7 @@ from .services import (
     validar_criacao_evolucao,
 )
 from .services_notification import cancelar_notificacoes, confirmar_presenca, criar_lembrete_consulta
+from .throttles import PasswordChangeThrottle, PresenceConfirmationThrottle, PublicRegistrationThrottle
 
 
 class ClinicaViewSet(viewsets.ModelViewSet):
@@ -106,6 +107,11 @@ class ClinicaViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action == 'cadastrar_paciente':
+            return [PublicRegistrationThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -224,6 +230,11 @@ class ConviteCadastroPacienteViewSet(viewsets.ModelViewSet):
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
 
+    def get_throttles(self):
+        if self.action == 'cadastrar':
+            return [PublicRegistrationThrottle()]
+        return super().get_throttles()
+
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return ConviteCadastroPaciente.objects.none()
@@ -306,6 +317,11 @@ class UsuarioViewSet(viewsets.ModelViewSet):
         if self.request.user.is_staff:
             return UsuarioAdminSerializer
         return PerfilUsuarioSerializer
+
+    def get_throttles(self):
+        if self.action == 'alterar_senha':
+            return [PasswordChangeThrottle()]
+        return super().get_throttles()
 
     @action(detail=False, methods=['post'], url_path='alterar-senha')
     def alterar_senha(self, request):
@@ -1225,6 +1241,11 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.OrderingFilter]
     ordering_fields = ['data_horario', 'criado_em']
     ordering = ['data_horario']
+
+    def get_throttles(self):
+        if self.action == 'confirmar_presenca':
+            return [PresenceConfirmationThrottle()]
+        return super().get_throttles()
 
     def create(self, request, *args, **kwargs):
         with transaction.atomic():

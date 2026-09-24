@@ -36,7 +36,7 @@ jobs:
     env:
       ENVIRONMENT: test
       DEBUG: "False"
-      SECRET_KEY: ci-secret-key
+      SECRET_KEY: ci-secret-key-para-testes-com-mais-de-cinquenta-caracteres-sem-uso-em-producao
       DATABASE_URL: postgres://clinica:clinica@localhost:5432/clinica_test
       USE_SQLITE_FOR_TESTS: "False"
       ALLOWED_HOSTS: localhost,127.0.0.1
@@ -62,6 +62,9 @@ jobs:
       - name: Check migrations
         run: python manage.py makemigrations --check --dry-run
 
+      - name: Django checks
+        run: python manage.py check
+
       - name: Run migrations
         run: python manage.py migrate --noinput
 
@@ -72,3 +75,9 @@ jobs:
         run: |
           python -m coverage run manage.py test api
           python -m coverage report
+
+      - name: Compile Python modules
+        run: python -m compileall api core
+
+      - name: Validate OpenAPI schema
+        run: python manage.py spectacular --file /tmp/openapi.yml --validate
