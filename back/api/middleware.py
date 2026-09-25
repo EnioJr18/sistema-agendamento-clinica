@@ -1,10 +1,20 @@
 import logging
+import re
 import time
 import uuid
 
 from django.conf import settings
 
 logger = logging.getLogger('api.request')
+
+CONVITE_CADASTRO_PATH = re.compile(r'^/api/v1/convites-pacientes/[^/]+/cadastrar/?$')
+
+
+def caminho_para_log(path):
+    """Remove credenciais de rotas publicas antes de registrar a requisicao."""
+    if CONVITE_CADASTRO_PATH.fullmatch(path):
+        return '/api/v1/convites-pacientes/<redacted>/cadastrar/'
+    return path
 
 
 class RequestLoggingMiddleware:
@@ -26,7 +36,7 @@ class RequestLoggingMiddleware:
             logger.info(
                 'request_completed method=%s path=%s status=%s duration_ms=%s request_id=%s',
                 request.method,
-                request.path,
+                caminho_para_log(request.path),
                 response.status_code,
                 duracao_ms,
                 request_id,

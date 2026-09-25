@@ -52,6 +52,8 @@ Authorization: Bearer <access_token>
 
 Usuarios comuns acessam apenas dados da propria clinica. Staff/admin pode administrar globalmente nesta etapa.
 
+> Pendencia arquitetural: `is_staff=True` ainda representa operador SaaS global e, portanto, nao deve ser atribuido a administradores de uma clinica. A separacao futura entre operador SaaS, administrador da clinica e recepcionista sera planejada junto com a adaptacao do frontend.
+
 ## Agenda
 
 Cada clinica possui configuracoes comerciais basicas:
@@ -78,6 +80,7 @@ Agendamentos respeitam o timezone e o expediente ativo da clinica:
 - agendamento durante bloqueio ativo da clinica retorna `409 Conflict`;
 - agendamento durante indisponibilidade ativa do dentista retorna `409 Conflict`;
 - sobreposicoes com outro agendamento ativo do mesmo dentista continuam retornando `409 Conflict`.
+- No PostgreSQL, uma exclusion constraint impede no banco duas reservas simultaneas com o mesmo dentista, clinica e intervalo sobreposto. Os status `CANCELADA` e `NAO_COMPARECEU` nao participam dessa restricao.
 
 Status oficiais de agendamento:
 

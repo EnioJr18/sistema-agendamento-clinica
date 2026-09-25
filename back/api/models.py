@@ -3,6 +3,8 @@ import uuid
 from datetime import date, timedelta
 
 from django.contrib.auth.models import AbstractUser
+from django.contrib.postgres.constraints import ExclusionConstraint
+from django.contrib.postgres.fields import DateTimeRangeField, RangeOperators
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -287,6 +289,25 @@ class Agendamento(models.Model):
 
     class Meta:
         ordering = ['data_horario']
+        constraints = [
+            ExclusionConstraint(
+                name='agendamento_intervalo_dentista_unico',
+                expressions=[
+                    ('clinica', RangeOperators.EQUAL),
+                    ('dentista', RangeOperators.EQUAL),
+                    (
+                        models.Func(
+                            'data_horario',
+                            'data_hora_fim',
+                            function='TSTZRANGE',
+                            output_field=DateTimeRangeField(),
+                        ),
+                        RangeOperators.OVERLAPS,
+                    ),
+                ],
+                condition=models.Q(status__in=['AGENDADA', 'CONFIRMADA', 'EM_ATENDIMENTO', 'CONCLUIDA']),
+            )
+        ]
         indexes = [
             models.Index(fields=['dentista', 'data_horario']),
             models.Index(fields=['clinica', 'status']),

@@ -56,12 +56,18 @@ class ProntuarioApiTest(APITestCase):
         )
 
     def agendamento(
-        self, *, status_agendamento=Agendamento.STATUS_EM_ATENDIMENTO, paciente=None, dentista=None, clinica=None
+        self,
+        *,
+        status_agendamento=Agendamento.STATUS_EM_ATENDIMENTO,
+        paciente=None,
+        dentista=None,
+        clinica=None,
+        deslocamento_minutos=0,
     ):
         clinica = clinica or self.clinica_a
         dentista = dentista or self.dentista_a
         paciente = paciente or self.paciente_a
-        inicio = timezone.now() + timedelta(days=1)
+        inicio = timezone.now() + timedelta(days=1, minutes=deslocamento_minutos)
         return Agendamento.objects.create(
             clinica=clinica,
             dentista=dentista,
@@ -128,7 +134,7 @@ class ProntuarioApiTest(APITestCase):
     def test_evolucao_permite_em_atendimento_e_concluida_e_protege_vinculos(self):
         self.client.force_authenticate(self.usuario_dentista_a)
         em_atendimento = self.agendamento()
-        concluida = self.agendamento(status_agendamento=Agendamento.STATUS_CONCLUIDA)
+        concluida = self.agendamento(status_agendamento=Agendamento.STATUS_CONCLUIDA, deslocamento_minutos=30)
         url = '/api/v1/evolucoes-clinicas/'
         primeira = self.client.post(
             url,

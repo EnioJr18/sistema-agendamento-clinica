@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
-from api.models import Clinica, Usuario
+from api.models import Clinica, ConviteCadastroPaciente, Usuario
 
 
 class JwtThrottleAndObservabilityTest(APITestCase):
@@ -70,3 +70,39 @@ class JwtThrottleAndObservabilityTest(APITestCase):
         self.assertIn('path=/api/health/', logs.output[0])
         self.assertNotIn('password', logs.output[0].lower())
         self.assertNotIn('authorization', logs.output[0].lower())
+
+    @override_settings(REQUEST_LOGGING_ENABLED=True)
+    def test_logs_sanitizam_token_de_convite_valido_e_invalido(self):
+        convite = ConviteCadastroPaciente.objects.create(clinica=self.usuario.clinica)
+        payload = {
+            'username': 'cadastro_por_convite',
+            'password': 'SenhaForte123!',
+            'nome_completo': 'Cadastro por convite',
+            'email': 'cadastro.convite@example.com',
+            'cpf': '90000000002',
+            'telefone': '82999999998',
+            'data_nascimento': '1990-01-01',
+        }
+
+        with self.assertLogs('api.request', level='INFO') as logs_validos:
+            resposta_valida = self.client.post(
+                f'/api/v1/convites-pacientes/{convite.token}/cadastrar/',
+                payload,
+                format='json',
+                HTTP_X_REQUEST_ID='convite-valido-123',
+            )
+        token_invalido = 'token-invalido-para-log'
+        with self.assertLogs('api.request', level='INFO') as logs_invalidos:
+            resposta_invalida = self.client.post(
+                f'/api/v1/convites-pacientes/{token_invalido}/cadastrar/',
+                payload,
+                format='json',
+                HTTP_X_REQUEST_ID='convite-invalido-123',
+            )
+
+        self.assertEqual(resposta_valida.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resposta_valida['X-Request-ID'], 'convite-valido-123')
+        self.assertEqual(resposta_invalida.status_code, status.HTTP_404_NOT_FOUND)
+        for mensagem, token in ((logs_validos.output[0], convite.token), (logs_invalidos.output[0], token_invalido)):
+            self.assertNotIn(token, mensagem)
+            self.assertIn('path=/api/v1/convites-pacientes/<redacted>/cadastrar/', mensagem)

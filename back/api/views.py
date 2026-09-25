@@ -80,6 +80,7 @@ from .services import (
     concluir_agendamento,
     confirmar_agendamento,
     dinheiro,
+    eh_conflito_de_intervalo_agendamento,
     gerar_parcelas,
     marcar_falta_agendamento,
     reagendar_agendamento,
@@ -1248,8 +1249,15 @@ class AgendamentoViewSet(viewsets.ModelViewSet):
         return super().get_throttles()
 
     def create(self, request, *args, **kwargs):
-        with transaction.atomic():
-            return super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                return super().create(request, *args, **kwargs)
+        except IntegrityError as exc:
+            if eh_conflito_de_intervalo_agendamento(exc):
+                from .services import ConflitoAgenda
+
+                raise ConflitoAgenda('Horario se sobrepoe a outro agendamento deste dentista.') from exc
+            raise
 
     def update(self, request, *args, **kwargs):
         return Response(

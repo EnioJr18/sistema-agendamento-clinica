@@ -10,6 +10,7 @@ from rest_framework.exceptions import APIException, ValidationError
 from .models import (
     Agendamento,
     BloqueioAgendaClinica,
+    Dentista,
     HorarioFuncionamentoClinica,
     IndisponibilidadeDentista,
     Orcamento,
@@ -22,6 +23,16 @@ class ConflitoAgenda(APIException):
     status_code = status.HTTP_409_CONFLICT
     default_detail = 'Horario indisponivel para este dentista.'
     default_code = 'conflito_agenda'
+
+
+CONSTRAINT_AGENDAMENTO_INTERVALO = 'agendamento_intervalo_dentista_unico'
+
+
+def eh_conflito_de_intervalo_agendamento(erro):
+    """Reconhece exclusivamente a violacao da exclusion constraint da agenda."""
+    causa = getattr(erro, '__cause__', None)
+    diagnostico = getattr(causa, 'diag', None)
+    return getattr(diagnostico, 'constraint_name', None) == CONSTRAINT_AGENDAMENTO_INTERVALO
 
 
 STATUS_BLOQUEIAM_HORARIO = {
@@ -148,6 +159,10 @@ def validar_agendamento_criacao_ou_reagendamento(
     duracao_minutos=None,
     agendamento_atual=None,
 ):
+    # Serializa reservas concorrentes do mesmo profissional na rota da API.
+    # A exclusion constraint continua protegendo escritas que contornem este fluxo.
+    if transaction.get_connection().in_atomic_block:
+        Dentista.objects.select_for_update().get(pk=dentista.pk)
     validar_data_futura(data_horario)
     validar_recursos_ativos(dentista, procedimento_ref)
     duracao, fim = preparar_janela_agendamento(data_horario, clinica, procedimento_ref, duracao_minutos)
